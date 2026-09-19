@@ -17,10 +17,8 @@ local defaultAmbient = Lighting.Ambient
 local defaultFogEnd = Lighting.FogEnd
 local defaultFogColor = Lighting.FogColor
 
-local horrorModeActive = false
 local nightAudioEnabled = true -- Состояние звука ночи
 local currentEntity = nil
-local isTriggered = false
 local sightTimer = 0
 local unseenTimer = 0
 local isWandering = false
@@ -84,7 +82,7 @@ topbarCorner.Parent = topbarButton
 
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainFrame"
-mainFrame.Size = UDim2.new(0, 200, 0, 335)
+mainFrame.Size = UDim2.new(0, 200, 0, 295)
 mainFrame.Position = UDim2.new(0, 10, 0, 50)
 mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
 mainFrame.BorderSizePixel = 0
@@ -129,12 +127,11 @@ local btnDay = createButton("BtnDay", "Day (День)", 40, Color3.fromRGB(50, 1
 local btnNight = createButton("BtnNight", "Night (Жесткая ночь)", 80, Color3.fromRGB(20, 20, 40))
 local btnOff = createButton("BtnOff", "OFF (Сброс света)", 120, Color3.fromRGB(80, 80, 90))
 local btnAudioToggle = createButton("BtnAudioToggle", "🔊 Звуки ночи: ON", 160, Color3.fromRGB(40, 140, 80))
-local btnHorror = createButton("BtnHorror", "💀 Horror Mode: OFF", 200, Color3.fromRGB(60, 60, 60))
-local btnUnload = createButton("BtnUnload", "⚠️ Полная отгрузка", 245, Color3.fromRGB(180, 40, 40))
+local btnUnload = createButton("BtnUnload", "⚠️ Полная отгрузка", 205, Color3.fromRGB(180, 40, 40))
 
 -- 2. Режимы Освещения
 local function isNightTime()
-	return Lighting.ClockTime < 6 or Lighting.ClockTime > 18 or horrorModeActive
+	return Lighting.ClockTime < 6 or Lighting.ClockTime > 18
 end
 
 local function setDayMode()
@@ -282,7 +279,7 @@ end
 local function spawnLogic()
 	task.spawn(function()
 		while task.wait(math.random(12, 22)) do
-			if isTriggered or not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+			if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
 				continue
 			end
 
@@ -308,12 +305,12 @@ local function startWandering()
 	if sound then sound:Play() end
 
 	task.spawn(function()
-		while isWandering and currentEntity and currentEntity.PrimaryPart and not isTriggered do
+		while isWandering and currentEntity and currentEntity.PrimaryPart do
 			local randomOffset = Vector3.new(math.random(-12, 12), 0, math.random(-12, 12))
 			local targetPos = torso.Position + randomOffset
 			
 			local startTime = tick()
-			while tick() - startTime < 3 and currentEntity and currentEntity.PrimaryPart and isWandering and not isTriggered do
+			while tick() - startTime < 3 and currentEntity and currentEntity.PrimaryPart and isWandering do
 				local dir = (targetPos - torso.Position).Unit
 				torso.CFrame = CFrame.new(torso.Position + dir * (7 * RunService.RenderStepped:Wait()), torso.Position + dir)
 			end
@@ -325,18 +322,16 @@ end
 
 -- 5. Обработчик кадров (RenderStepped)
 RunService.RenderStepped:Connect(function(dt)
-	if currentEntity and currentEntity.PrimaryPart and not isTriggered then
+	if currentEntity and currentEntity.PrimaryPart then
 		local npcPart = currentEntity.PrimaryPart
 
-		-- Прямой взгляд прицелом
+		-- Прямой взгляд прицелом — мгновенное исчезновение
 		if isLookingDirectlyAt(npcPart) then
-			if not horrorModeActive then
-				currentEntity:Destroy()
-				currentEntity = nil
-				sightTimer = 0
-				unseenTimer = 0
-				return
-			end
+			currentEntity:Destroy()
+			currentEntity = nil
+			sightTimer = 0
+			unseenTimer = 0
+			return
 		end
 
 		-- В зоне экрана
@@ -346,64 +341,15 @@ RunService.RenderStepped:Connect(function(dt)
 			local sound = npcPart:FindFirstChild("Footsteps")
 			if sound then sound:Stop() end
 
-			if horrorModeActive then
-				-- Нападение при Horror Mode
-				isTriggered = true
-				local npcModel = currentEntity
-
-				local scream = Instance.new("Sound")
-				scream.SoundId = "rbxassetid://9114223179"
-				scream.Volume = 4
-				scream.Parent = npcPart
-				scream:Play()
-
-				for _, part in ipairs(npcModel:GetChildren()) do
-					if part:IsA("BasePart") then part.Anchored = true end
-				end
-
-				local stretchDuration = 3
-				for _, part in ipairs(npcModel:GetChildren()) do
-					if part:IsA("BasePart") then
-						local targetScale = part.Size * Vector3.new(1.8, 3.2, 1.8)
-						TweenService:Create(part, TweenInfo.new(stretchDuration, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {Size = targetScale}):Play()
-					end
-				end
-
-				task.wait(stretchDuration)
-
-				-- Погоня
-				task.spawn(function()
-					local speed = 32
-					while npcModel and npcModel.PrimaryPart and player.Character and player.Character:FindFirstChild("HumanoidRootPart") do
-						local hrp = player.Character.HumanoidRootPart
-						local currentPos = npcModel.PrimaryPart.Position
-						local targetPos = Vector3.new(hrp.Position.X, currentPos.Y, hrp.Position.Z)
-						local distance = (targetPos - currentPos).Magnitude
-
-						if distance < 4.5 then
-							if player.Character:FindFirstChild("Humanoid") then
-								player.Character.Humanoid.Health = 0
-							end
-							task.wait(0.2)
-							player:Kick("💀 Черный силуэт нагнал вас.")
-							break
-						end
-
-						local newPos = currentPos + (targetPos - currentPos).Unit * (speed * RunService.RenderStepped:Wait())
-						npcModel:SetPrimaryPartCFrame(CFrame.new(newPos, targetPos))
-					end
-				end)
-			else
-				-- Задержка 3 сек в обычном режиме перед исчезновением
-				sightTimer = sightTimer + dt
-				if sightTimer >= 3 then
-					currentEntity:Destroy()
-					currentEntity = nil
-					sightTimer = 0
-				end
+			-- Исчезает через 3 секунды наблюдения
+			sightTimer = sightTimer + dt
+			if sightTimer >= 3 then
+				currentEntity:Destroy()
+				currentEntity = nil
+				sightTimer = 0
 			end
 		else
-			-- Не видно силуэт
+			-- Не видно силуэт — взращиваем таймер отсутствия видимости
 			sightTimer = 0
 			unseenTimer = unseenTimer + dt
 			if unseenTimer >= 4 then
@@ -424,18 +370,6 @@ btnAudioToggle.MouseButton1Click:Connect(function()
 		btnAudioToggle.BackgroundColor3 = Color3.fromRGB(120, 60, 60)
 	end
 	updateFTAPAudio(isNightTime())
-end)
-
-btnHorror.MouseButton1Click:Connect(function()
-	horrorModeActive = not horrorModeActive
-	if horrorModeActive then
-		btnHorror.Text = "💀 Horror Mode: ON"
-		btnHorror.BackgroundColor3 = Color3.fromRGB(200, 20, 20)
-		setNightMode()
-	else
-		btnHorror.Text = "💀 Horror Mode: OFF"
-		btnHorror.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-	end
 end)
 
 local function unloadScript()
