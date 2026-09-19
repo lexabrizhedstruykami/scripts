@@ -129,7 +129,7 @@ local btnDay = createButton("BtnDay", "Day (День)", 40, Color3.fromRGB(50, 1
 local btnNight = createButton("BtnNight", "Night (Жесткая ночь)", 80, Color3.fromRGB(20, 20, 40))
 local btnOff = createButton("BtnOff", "OFF (Сброс света)", 120, Color3.fromRGB(80, 80, 90))
 local btnAudioToggle = createButton("BtnAudioToggle", "🔊 Звуки ночи: ON", 160, Color3.fromRGB(40, 140, 80))
-local btnHorror = createButton("BtnHorror", "Ночь v2: OFF", 200, Color3.fromRGB(60, 60, 60))
+local btnHorror = createButton("BtnHorror", "💀 Horror Mode: OFF", 200, Color3.fromRGB(60, 60, 60))
 local btnUnload = createButton("BtnUnload", "⚠️ Полная отгрузка", 245, Color3.fromRGB(180, 40, 40))
 
 -- 2. Режимы Освещения
@@ -171,7 +171,7 @@ local function createBlackNPC()
 	if currentEntity then currentEntity:Destroy() end
 
 	local model = Instance.new("Model")
-	model.Name = "BlackNPC"
+	model.Name = "FTAP_BlackNPC"
 
 	local torso = Instance.new("Part")
 	torso.Name = "Torso"
@@ -429,11 +429,11 @@ end)
 btnHorror.MouseButton1Click:Connect(function()
 	horrorModeActive = not horrorModeActive
 	if horrorModeActive then
-		btnHorror.Text = "Ночь v2: ON"
+		btnHorror.Text = "💀 Horror Mode: ON"
 		btnHorror.BackgroundColor3 = Color3.fromRGB(200, 20, 20)
 		setNightMode()
 	else
-		btnHorror.Text = "Ночь v2: OFF"
+		btnHorror.Text = "💀 Horror Mode: OFF"
 		btnHorror.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
 	end
 end)
@@ -454,4 +454,4 @@ btnNight.MouseButton1Click:Connect(setNightMode)
 btnOff.MouseButton1Click:Connect(resetLighting)
 btnUnload.MouseButton1Click:Connect(unloadScript)
 
-spawnLogic()	
+spawnLogic()
