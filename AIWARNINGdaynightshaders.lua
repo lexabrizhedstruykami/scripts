@@ -171,7 +171,7 @@ local function createBlackNPC()
 	if currentEntity then currentEntity:Destroy() end
 
 	local model = Instance.new("Model")
-	model.Name = "FTAP_BlackNPC"
+	model.Name = "BlackNPC"
 
 	local torso = Instance.new("Part")
 	torso.Name = "Torso"
