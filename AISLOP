@@ -1,6 +1,6 @@
 -- ==========================================
 --               originLIB v5.0
---   Rayfield Edition — Refactored & Optimized
+--           Refactored & Optimized
 -- ==========================================
 --
 -- ИЗМЕНЕНИЯ v4.0 -> v5.0:
@@ -85,11 +85,58 @@
 --  окно, и включается заново при открытии, если настройка активна. Доступен
 --  и программно: originLIB:SetBlurEnabled(bool), originLIB:SetBlurSize(0..24).
 -- ==========================================
+--
+-- UPDATE v5.3 "Cursor & Glass":
+--  [CHANGE] Курсор переписан: если он уже свободен — библиотека его не трогает
+--        (ни закрытия/открытия заново, ни записей в UserInputService). Действует
+--        только когда курсор реально закрыт (LockCenter — шифтлок/первое лицо —
+--        или скрыт). Состояние восстанавливается, только если его меняли мы.
+--        Пока окно открыто, повторная блокировка игрой снимается каждый кадр
+--        (проверка RenderStepped живёт только пока открыто окно).
+--  [FEATURE] GUI Settings: Toggle "Auto Unlock Cursor" (вкл по умолчанию),
+--        программно: originLIB:SetCursorUnlock(bool).
+--  [FEATURE] GUI Settings: Toggle "Enable Blur" — стеклянный режим окна:
+--        фон окна на 50% прозрачный + Part (Glass, Transparency 0.3, без
+--        коллизии) ровно по размеру окна, следует за окном и камерой; парт
+--        лежит в Workspace.CurrentCamera. Программно: window:SetGlassEnabled(bool).
+--  [CHANGE] Прежние "Background Blur"/"Blur Intensity" переименованы в
+--        "Fullscreen Blur"/"Fullscreen Blur Intensity" (логика не менялась).
+--  [CHANGE] ScreenGui окна теперь с IgnoreGuiInset = true (координаты GUI
+--        совпадают с вьюпортом камеры — нужно для точного размера парта).
+-- ==========================================
+--
+-- UPDATE v5.4:
+--  [FIX] Стекло ("Enable Blur") съезжало вверх на высоту верхней панели Roblox:
+--        координаты окна (AbsolutePosition) и координаты камеры
+--        (ViewportPointToRay) отличались на инсет. Теперь сдвиг измеряется
+--        в рантайме (вьюпорт камеры минус фактическая область ScreenGui) и
+--        компенсируется автоматически; если инсета нет — не добавляется ничего.
+--  [FEATURE] GUI Settings: Toggle "Glass Darkness" ("тьма": тёмный оттенок
+--        стекла, прозрачность 0.3). Выключено — стекло почти прозрачное (0.98),
+--        размытие остаётся. Программно: window:SetGlassDark(bool).
+--  [FEATURE] GUI Settings: Slider "Glass Y Offset" — ручная подстройка стекла
+--        по вертикали (запасной вариант). Программно: window:SetGlassOffsetY(px).
+--  [FEATURE] GUI Settings: предупреждение о качестве графики (шкала 1–10):
+--        8 и выше — "it's okay", ниже 8 — "background blur won't work. use
+--        fullscreen blur". Обновляется на лету при смене графики. Читает
+--        UserGameSettings.SavedQualityLevel, а в режиме Automatic —
+--        Rendering.QualityLevel. Если прочитать нельзя — "unknown".
+--  [FEATURE] Новый элемент Tab:Notice(text, color) — карточка-предупреждение
+--        с переносом текста; возвращает { Label, Set(text, color) }.
+-- ==========================================
 
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
 local Lighting = game:GetService("Lighting")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+-- Настройки "стеклянного" режима окна (кнопка "Enable Blur" в GUI Settings).
+local GLASS_PART_TRANSPARENCY = 0.3    -- прозрачность парта-стекла ("тьма" включена)
+local GLASS_CLEAR_TRANSPARENCY = 0.98  -- почти невидимое стекло ("тьма" выключена, блюр остаётся)
+local GLASS_WINDOW_TRANSPARENCY = 0.5  -- прозрачность фона окна (наполовину)
+local GLASS_DISTANCE = 0.001           -- отступ парта от плоскости камеры (studs)
 
 local originLIB = {
     Windows = {},            -- все живые окна (для UnloadAll / многооконности)
@@ -97,41 +144,99 @@ local originLIB = {
     NotificationHolder = nil,
     NotifGui = nil,
     _openWindowCount = 0,
+    _nextWindowId = 0,
+    -- Курсор
+    _cursorUnlockEnabled = true, -- настройка "Auto Unlock Cursor"
+    _cursorChanged = false,      -- меняли ли МЫ курсор (только тогда его восстанавливаем)
+    _cursorConn = nil,           -- RenderStepped-проверка, живёт только пока открыто окно
     _savedMouseIconEnabled = nil,
     _savedMouseBehavior = nil,
-    _blurEnabled = false,   -- включён ли Realtime Glass Blur в GUI Settings
-    _blurSize = 12,         -- текущая интенсивность блюра
-    BlurEffect = nil,       -- Lighting.BlurEffect, создаётся лениво при первом включении
+    -- Полноэкранный блюр (Lighting.BlurEffect)
+    _blurEnabled = false,
+    _blurSize = 12,
+    BlurEffect = nil,
+    -- Стеклянный парт (общий DepthOfField на все окна с включённым стеклом)
+    _glassUsers = 0,
+    _glassDOF = nil,
 }
 originLIB.__index = originLIB
 
--- FEATURE: пока открыто хотя бы одно окно originLIB, курсор мыши должен быть
--- виден и свободен (не залочен камерой/прицелом игры), иначе пользователь
--- физически не может кликать по интерфейсу. Как только закрывается ПОСЛЕДНЕЕ
--- открытое окно — исходное поведение мыши (в т.ч. её кастомный лок, если он
--- был в игре) полностью восстанавливается. Считаем через delta (+1/-1), а не
--- через плоский Visible-флаг, чтобы это корректно работало при нескольких
--- одновременно открытых окнах (многооконный режим).
-function originLIB:_adjustMouseCapture(delta)
-    local before = self._openWindowCount
-    self._openWindowCount = math.max(0, before + delta)
+-- ==========================================
+-- КУРСОР
+-- Пока открыто хотя бы одно окно, курсор должен быть свободен, иначе по
+-- интерфейсу не покликать. ВАЖНО: если курсор уже свободен — мы его вообще
+-- не трогаем (не закрываем/открываем заново, ничего не сохраняем). Действуем
+-- только когда он реально "закрыт": залочен по центру (шифтлок, первое лицо)
+-- или скрыт. Исходное состояние восстанавливаем, только если МЫ его меняли.
+-- LockCurrentPosition (вращение камеры зажатой ПКМ) намеренно не трогаем.
+-- ==========================================
+local function cursorIsClosed()
+    return UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter
+        or not UserInputService.MouseIconEnabled
+end
 
-    if before == 0 and self._openWindowCount > 0 then
-        self._savedMouseIconEnabled = UserInputService.MouseIconEnabled
+function originLIB:_unlockCursorIfClosed()
+    if not cursorIsClosed() then return end
+
+    if not self._cursorChanged then
         self._savedMouseBehavior = UserInputService.MouseBehavior
-        UserInputService.MouseIconEnabled = true
-        UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-    elseif before > 0 and self._openWindowCount == 0 then
-        if self._savedMouseBehavior ~= nil then
-            UserInputService.MouseBehavior = self._savedMouseBehavior
-        end
-        if self._savedMouseIconEnabled ~= nil then
-            UserInputService.MouseIconEnabled = self._savedMouseIconEnabled
-        end
+        self._savedMouseIconEnabled = UserInputService.MouseIconEnabled
+        self._cursorChanged = true
     end
 
-    -- Блюр должен погаснуть вместе с последним закрытым окном, даже если
-    -- переключатель "Background Blur" остался включён в настройках.
+    UserInputService.MouseIconEnabled = true
+    if UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter then
+        UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+    end
+end
+
+function originLIB:_restoreCursor()
+    if not self._cursorChanged then return end
+    self._cursorChanged = false
+
+    if self._savedMouseBehavior ~= nil then
+        UserInputService.MouseBehavior = self._savedMouseBehavior
+    end
+    if self._savedMouseIconEnabled ~= nil then
+        UserInputService.MouseIconEnabled = self._savedMouseIconEnabled
+    end
+    self._savedMouseBehavior = nil
+    self._savedMouseIconEnabled = nil
+end
+
+function originLIB:_applyCursorState()
+    local manage = self._cursorUnlockEnabled and self._openWindowCount > 0
+
+    if manage then
+        self:_unlockCursorIfClosed()
+        -- Игра может залочить курсор обратно (шифтлок/прицел) — проверяем каждый
+        -- кадр, но пишем в UserInputService только если он действительно закрыт.
+        if not self._cursorConn then
+            self._cursorConn = RunService.RenderStepped:Connect(function()
+                self:_unlockCursorIfClosed()
+            end)
+        end
+    else
+        if self._cursorConn then
+            self._cursorConn:Disconnect()
+            self._cursorConn = nil
+        end
+        self:_restoreCursor()
+    end
+end
+
+-- Включить/выключить автоматическое освобождение курсора (тоггл в GUI Settings).
+function originLIB:SetCursorUnlock(state)
+    self._cursorUnlockEnabled = state and true or false
+    self:_applyCursorState()
+end
+
+-- Вызывается окнами при открытии (+1) / закрытии (-1). Счётчик, а не флаг,
+-- чтобы всё работало при нескольких одновременно открытых окнах.
+function originLIB:_adjustMouseCapture(delta)
+    self._openWindowCount = math.max(0, self._openWindowCount + delta)
+    self:_applyCursorState()
+    -- Полноэкранный блюр гаснет вместе с последним закрытым окном.
     self:_applyBlurState()
 end
 
@@ -215,6 +320,25 @@ local function toHex(color)
     return string.format("#%02X%02X%02X", color.R * 255, color.G * 255, color.B * 255)
 end
 
+-- Уровень графики игрока по шкале 1–10 (как ползунок в меню Roblox) или nil,
+-- если прочитать не удалось. Если выбран режим "Automatic", берём фактический
+-- Rendering.QualityLevel (1–21) и переводим в шкалу 1–10.
+local function getGraphicsLevel()
+    local ok, level = pcall(function()
+        local saved = UserSettings():GetService("UserGameSettings").SavedQualityLevel.Value
+        if saved and saved > 0 then
+            return saved
+        end
+        local rendering = settings().Rendering.QualityLevel.Value
+        if rendering and rendering > 0 then
+            return math.clamp(math.floor((rendering + 1) / 2), 1, 10)
+        end
+        return nil
+    end)
+    if ok then return level end
+    return nil
+end
+
 -- ==========================================
 -- REALTIME GLASS BLUR
 -- Единый на всю библиотеку Lighting.BlurEffect, создаётся лениво. Блюрит
@@ -262,6 +386,33 @@ function originLIB:SetBlurSize(size)
     self._blurSize = math.clamp(size, 0, 24)
     if self._blurEnabled and self.BlurEffect then
         tween(self.BlurEffect, {Size = self._blurSize}, 0.15)
+    end
+end
+
+-- ==========================================
+-- GLASS: общий DepthOfField для парта-стекла
+-- Один эффект на всю библиотеку; считаем, сколько окон сейчас используют стекло.
+-- Параметры — стандартный приём для блюра "за" околокамерным партом.
+-- ==========================================
+function originLIB:_acquireGlassDOF()
+    self._glassUsers = self._glassUsers + 1
+    if not self._glassDOF then
+        local dof = Instance.new("DepthOfFieldEffect")
+        dof.Name = "originLIB_GlassDOF"
+        dof.FarIntensity = 0
+        dof.FocusDistance = 0.05
+        dof.InFocusRadius = 0.1
+        dof.NearIntensity = 1
+        dof.Parent = Lighting
+        self._glassDOF = dof
+    end
+    self._glassDOF.Enabled = true
+end
+
+function originLIB:_releaseGlassDOF()
+    self._glassUsers = math.max(0, self._glassUsers - 1)
+    if self._glassUsers == 0 and self._glassDOF then
+        self._glassDOF.Enabled = false
     end
 end
 
@@ -480,11 +631,22 @@ function originLIB:Unload()
         self.NotificationHolder = nil
     end
 
+    -- Окна уже выгружены и сняли свои счётчики; на всякий случай гасим всё
+    -- общее: возвращаем курсор, снимаем проверку RenderStepped, удаляем эффекты.
+    self._openWindowCount = 0
+    self:_applyCursorState()
+
     if self.BlurEffect then
         self.BlurEffect:Destroy()
         self.BlurEffect = nil
     end
     self._blurEnabled = false
+
+    if self._glassDOF then
+        self._glassDOF:Destroy()
+        self._glassDOF = nil
+    end
+    self._glassUsers = 0
 end
 
 -- Явный алиас — то же самое, что originLIB:Unload(), но название однозначно
@@ -509,12 +671,26 @@ function originLIB:Window(config)
     window.KeybindMap = {}         -- [Enum.KeyCode] = { callback, callback, ... }
     window.ListeningKeybind = nil  -- элемент, ожидающий нажатия клавиши (максимум один)
     window.DragState = nil         -- активный drag/slide прямо сейчас
+    window.GlassEnabled = false    -- кнопка "Enable Blur" (стеклянный парт)
+    window.GlassPart = nil
+    window.GlassDark = true        -- "Glass Darkness": тёмный оттенок стекла
+    window.GlassOffsetY = 0        -- ручная подстройка по вертикали (px)
+    window._glassActive = false
+
+    originLIB._nextWindowId = originLIB._nextWindowId + 1
+    window._id = originLIB._nextWindowId
 
     table.insert(originLIB.Windows, window)
 
     local ScreenGui = Instance.new("ScreenGui")
     ScreenGui.Name = "originLIB_UI"
     ScreenGui.ResetOnSpawn = false
+    -- Координаты GUI = координаты вьюпорта камеры (без верхнего инсета).
+    -- Нужно, чтобы стеклянный парт точно ложился под окно.
+    ScreenGui.IgnoreGuiInset = true
+    -- В новых версиях Roblox инсет верхней панели задаётся ещё и ScreenInsets;
+    -- свойства может не быть в старых клиентах — поэтому pcall.
+    pcall(function() ScreenGui.ScreenInsets = Enum.ScreenInsets.None end)
     protectUI(ScreenGui)
 
     window.Theme = {
@@ -593,8 +769,9 @@ function originLIB:Window(config)
     --
     -- FEATURE: та же подписка следит, чтобы курсор мыши был виден и свободен,
     -- пока это окно открыто (см. originLIB:_adjustMouseCapture выше).
+    window.ShadowFrame = ShadowFrame
     MainFrame:GetPropertyChangedSignal("Visible"):Connect(function()
-        ShadowFrame.Visible = MainFrame.Visible
+        window:_refreshGlass() -- заодно синхронизирует видимость тени
         originLIB:_adjustMouseCapture(MainFrame.Visible and 1 or -1)
     end)
 
@@ -890,6 +1067,9 @@ end
 
 function WindowClass:UpdateThemeColor(category, color)
     self.Theme[category] = color
+    if category == "Background" and self.GlassPart then
+        self.GlassPart.Color = color
+    end
     if self.ThemeElements[category] then
         for _, obj in ipairs(self.ThemeElements[category]) do
             if obj:IsA("UIStroke") then
@@ -903,6 +1083,145 @@ function WindowClass:UpdateThemeColor(category, color)
             end
         end
     end
+end
+
+-- ==========================================
+-- GLASS: стеклянный парт под окном ("Enable Blur")
+-- Включённый режим:
+--  * фон окна (MainFrame, шапка, панель вкладок) становится прозрачным на 50%;
+--  * создаётся Part (Material=Glass, Transparency=0.3, без коллизии) ровно по
+--    размеру окна: каждый кадр его углы проецируются через камеру на область
+--    окна на экране, поэтому он двигается и масштабируется вместе с окном
+--    (перетаскивание, ресайз, сворачивание) и следует за камерой;
+--  * на время работы включается общий DepthOfField (см. _acquireGlassDOF).
+-- Парт лежит в Workspace.CurrentCamera — вне игрового мира, его не видят
+-- рейкасты игры, он не сталкивается и не триггерит Touched.
+-- ==========================================
+function WindowClass:_updateGlass()
+    local part = self.GlassPart
+    local cam = Workspace.CurrentCamera
+    if not part or not cam or not self.MainFrame then return end
+
+    if part.Parent ~= cam then
+        part.Parent = cam -- камеру могли пересоздать
+    end
+
+    local pos = self.MainFrame.AbsolutePosition
+    local size = self.MainFrame.AbsoluteSize
+
+    -- FIX (стекло "съехало вверх"): ViewportPointToRay принимает координаты
+    -- всего вьюпорта камеры, а AbsolutePosition считается внутри области
+    -- ScreenGui, которую система может сдвигать вниз на инсет верхней панели
+    -- Roblox (36/58 px) даже при IgnoreGuiInset. Не гадаем, а измеряем:
+    -- разница между вьюпортом и фактической областью ScreenGui даёт сдвиг.
+    -- Если AbsolutePosition уже в экранных координатах (ScreenGui.AbsolutePosition
+    -- сам смещён), формула даёт 0 и ничего не добавляется.
+    local offsetY = 0
+    local gui = self.ScreenGui
+    if gui then
+        local guiSize, guiPos = gui.AbsoluteSize, gui.AbsolutePosition
+        if guiSize.Y > 0 then
+            offsetY = math.clamp(cam.ViewportSize.Y - guiSize.Y - guiPos.Y, 0, 120)
+        end
+    end
+    offsetY = offsetY + self.GlassOffsetY -- ручная подстройка (слайдер "Glass Y Offset")
+
+    local function pointAt(x, y)
+        local ray = cam:ViewportPointToRay(x, y + offsetY, 0)
+        return ray.Origin + ray.Direction * GLASS_DISTANCE
+    end
+
+    local topLeft = pointAt(pos.X, pos.Y)
+    local topRight = pointAt(pos.X + size.X, pos.Y)
+    local bottomLeft = pointAt(pos.X, pos.Y + size.Y)
+
+    local center = (topRight + bottomLeft) / 2
+    local width = math.max((topRight - topLeft).Magnitude, 0.001)
+    local height = math.max((bottomLeft - topLeft).Magnitude, 0.001)
+
+    part.Size = Vector3.new(width, height, 0.001)
+    part.CFrame = CFrame.lookAt(center, center + cam.CFrame.LookVector)
+end
+
+function WindowClass:_setGlassActive(active)
+    active = active and true or false
+    if active == self._glassActive then return end
+    self._glassActive = active
+
+    local bindName = "originLIB_Glass_" .. tostring(self._id)
+
+    if active then
+        local part = Instance.new("Part")
+        part.Name = "originLIB_Glass"
+        part.Material = Enum.Material.Glass
+        part.Color = self.Theme.Background
+        part.Transparency = self.GlassDark and GLASS_PART_TRANSPARENCY or GLASS_CLEAR_TRANSPARENCY
+        part.Anchored = true
+        part.CanCollide = false
+        part.CanTouch = false
+        part.CanQuery = false
+        part.CastShadow = false
+        part.Locked = true
+        part.Size = Vector3.new(1, 1, 0.001)
+        part.Parent = Workspace.CurrentCamera
+        self.GlassPart = part
+
+        originLIB:_acquireGlassDOF()
+
+        -- После скрипта камеры, чтобы парт не отставал на кадр.
+        RunService:BindToRenderStep(bindName, Enum.RenderPriority.Camera.Value + 1, function()
+            self:_updateGlass()
+        end)
+        self:_updateGlass()
+    else
+        RunService:UnbindFromRenderStep(bindName)
+        if self.GlassPart then
+            self.GlassPart:Destroy()
+            self.GlassPart = nil
+        end
+        originLIB:_releaseGlassDOF()
+    end
+end
+
+-- Парт нужен, только пока включён режим И окно видимо.
+function WindowClass:_refreshGlass()
+    local visible = self.MainFrame and self.MainFrame.Visible
+    self:_setGlassActive(self.GlassEnabled and visible)
+    -- Тень под полупрозрачным окном просвечивала бы сквозь него — прячем.
+    if self.ShadowFrame then
+        self.ShadowFrame.Visible = (visible and not self.GlassEnabled) and true or false
+    end
+end
+
+-- "Тьма": тёмный оттенок стекла. Выключено — стекло почти прозрачное (парт
+-- остаётся, поэтому размытие сохраняется, но фон не затемняется).
+function WindowClass:SetGlassDark(state)
+    self.GlassDark = state and true or false
+    if self.GlassPart then
+        tween(self.GlassPart, {
+            Transparency = self.GlassDark and GLASS_PART_TRANSPARENCY or GLASS_CLEAR_TRANSPARENCY
+        }, 0.2)
+    end
+end
+
+-- Ручная подстройка по вертикали на случай, если автокомпенсация не совпала
+-- с вашим клиентом (положительное значение сдвигает стекло вниз).
+function WindowClass:SetGlassOffsetY(px)
+    self.GlassOffsetY = tonumber(px) or 0
+end
+
+function WindowClass:SetGlassEnabled(state)
+    self.GlassEnabled = state and true or false
+
+    local transparency = self.GlassEnabled and GLASS_WINDOW_TRANSPARENCY or 0
+    for _, obj in ipairs(self.ThemeElements.Background) do
+        tween(obj, {BackgroundTransparency = transparency})
+    end
+    for _, obj in ipairs(self.ThemeElements.TopBar) do
+        tween(obj, {BackgroundTransparency = transparency})
+    end
+
+    self:_refreshGlass()
 end
 
 -- ==========================================
@@ -943,6 +1262,9 @@ function WindowClass:Unload()
     if self.MainFrame and self.MainFrame.Visible then
         originLIB:_adjustMouseCapture(-1)
     end
+
+    -- Снимаем парт-стекло, привязку к RenderStep и счётчик DepthOfField.
+    self:_setGlassActive(false)
 
     if self.ScreenGui then
         self.ScreenGui:Destroy()
@@ -989,17 +1311,70 @@ function WindowClass:BuildSettingsTab()
         end
     end)
 
+    settingsTab:Section("Курсор")
+
+    -- Освобождает курсор, пока открыто окно. Если курсор уже свободен — ничего
+    -- не делает (не закрывает и не открывает заново); если игра залочила его
+    -- (шифтлок, первое лицо) — разлочивает и вернёт как было при закрытии окна.
+    settingsTab:Toggle("Auto Unlock Cursor", true, function(state)
+        originLIB:SetCursorUnlock(state)
+    end)
+
     settingsTab:Section("Эффекты")
 
-    -- FEATURE: Realtime Glass Blur — размывает весь экран позади интерфейса
-    -- (единый Lighting.BlurEffect на всю библиотеку, см. originLIB:_applyBlurState).
-    -- Настройка общая для всех открытых окон, т.к. это эффект на весь экран,
-    -- а не конкретной панели.
-    settingsTab:Toggle("Background Blur", false, function(state)
+    -- Предупреждение о качестве графики: Enable Blur (стекло) зависит от
+    -- DepthOfField, который работает только на высоком качестве графики.
+    -- Обновляется на лету, если игрок меняет графику, пока окно открыто.
+    local graphicsNotice = settingsTab:Notice("", Color3.fromRGB(150, 150, 170))
+    self.GraphicsNotice = graphicsNotice
+
+    local function refreshGraphicsNotice()
+        local level = getGraphicsLevel()
+        if level == nil then
+            graphicsNotice.Set("Graphics quality: unknown (could not read your graphic settings)",
+                Color3.fromRGB(150, 150, 170))
+        elseif level >= 8 then
+            graphicsNotice.Set("Warning: your graphic settings set more than 8 it's okay",
+                Color3.fromRGB(110, 210, 140))
+        else
+            graphicsNotice.Set("Warning your graphic settings is lower than 8, background blur won't work. use fullscreen blur",
+                Color3.fromRGB(255, 190, 80))
+        end
+    end
+    refreshGraphicsNotice()
+
+    pcall(function()
+        local userGameSettings = UserSettings():GetService("UserGameSettings")
+        table.insert(self.Connections,
+            userGameSettings:GetPropertyChangedSignal("SavedQualityLevel"):Connect(refreshGraphicsNotice))
+        table.insert(self.Connections,
+            settings().Rendering:GetPropertyChangedSignal("QualityLevel"):Connect(refreshGraphicsNotice))
+    end)
+
+    -- Стеклянный режим: фон окна на 50% прозрачный + Part-стекло (30%) ровно
+    -- под размер окна, следует за окном на экране, без коллизии.
+    settingsTab:Toggle("Enable Blur", false, function(state)
+        self:SetGlassEnabled(state)
+    end)
+
+    -- Тьма: тёмный оттенок стекла (прозрачность 0.3). Выключить — останется
+    -- почти прозрачное стекло с размытием.
+    settingsTab:Toggle("Glass Darkness", true, function(state)
+        self:SetGlassDark(state)
+    end)
+
+    -- Запасной вариант, если стекло всё же не совпало с окном по вертикали.
+    settingsTab:Slider("Glass Y Offset", -120, 120, 0, function(val)
+        self:SetGlassOffsetY(val)
+    end)
+
+    -- Размытие всего экрана позади интерфейса (единый Lighting.BlurEffect на
+    -- всю библиотеку, см. originLIB:_applyBlurState). Общее для всех окон.
+    settingsTab:Toggle("Fullscreen Blur", false, function(state)
         originLIB:SetBlurEnabled(state)
     end)
 
-    settingsTab:Slider("Blur Intensity", 0, 24, 12, function(val)
+    settingsTab:Slider("Fullscreen Blur Intensity", 0, 24, 12, function(val)
         originLIB:SetBlurSize(val)
     end)
 
@@ -2016,6 +2391,63 @@ function TabClass:Section(text)
     Line.Parent = Frame
 end
 
+-- ---------- Notice (НОВЫЙ ЭЛЕМЕНТ) ----------
+-- Карточка-предупреждение с переносом текста и цветной обводкой. Возвращает
+-- объект с методом Set(text, color) для обновления "на лету".
+function TabClass:Notice(text, color)
+    local window = self.Window
+    color = color or Color3.fromRGB(255, 190, 80)
+
+    local Frame = Instance.new("Frame")
+    Frame.Size = UDim2.new(1, -5, 0, 0)
+    Frame.AutomaticSize = Enum.AutomaticSize.Y
+    Frame.BackgroundColor3 = window.Theme.Element
+    Frame.Parent = self.Page
+    table.insert(window.ThemeElements.Element, Frame)
+
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 6)
+    Corner.Parent = Frame
+    table.insert(window.ThemeElements.Corners, Corner)
+
+    local Stroke = Instance.new("UIStroke")
+    Stroke.Color = color
+    Stroke.Thickness = 1
+    Stroke.Transparency = 0.45
+    Stroke.Parent = Frame
+
+    local Padding = Instance.new("UIPadding")
+    Padding.PaddingTop = UDim.new(0, 8)
+    Padding.PaddingBottom = UDim.new(0, 8)
+    Padding.PaddingLeft = UDim.new(0, 10)
+    Padding.PaddingRight = UDim.new(0, 10)
+    Padding.Parent = Frame
+
+    local Label = Instance.new("TextLabel")
+    Label.Size = UDim2.new(1, 0, 0, 0)
+    Label.AutomaticSize = Enum.AutomaticSize.Y
+    Label.BackgroundTransparency = 1
+    Label.Text = text or ""
+    Label.TextColor3 = color
+    Label.Font = Enum.Font.Gotham
+    Label.TextSize = 12
+    Label.TextWrapped = true
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.TextYAlignment = Enum.TextYAlignment.Top
+    Label.Parent = Frame
+
+    return {
+        Label = Label,
+        Set = function(newText, newColor)
+            Label.Text = newText or ""
+            if newColor then
+                Label.TextColor3 = newColor
+                Stroke.Color = newColor
+            end
+        end,
+    }
+end
+
 -- ---------- Label (НОВЫЙ ЭЛЕМЕНТ) ----------
 -- Простая статичная строка текста без фона — для коротких подсказок между
 -- элементами, когда полноценный Paragraph избыточен.
@@ -2049,7 +2481,6 @@ function TabClass:Divider()
     Line.Parent = Holder
 end
 
-return originLIB
 
 --[[ ==========================================
      ПРИМЕР ИСПОЛЬЗОВАНИЯ (не выполняется автоматически)
@@ -2057,8 +2488,6 @@ return originLIB
      раскомментируйте блок ниже (или скопируйте в свой скрипт), чтобы
      увидеть демонстрацию, включая многооконный режим и новые элементы.
      ==========================================
-
-local originLIB = loadstring(game:HttpGet("URL_К_ВАШЕМУ_СКРИПТУ"))()
 
 originLIB:ShowIntro("originLIB v5.0 Rayfield", 2)
 
@@ -2116,5 +2545,3 @@ end)
 originLIB:OnUnload(function()
     print("[UNLOAD] Скрипт очистил все свои подключения и циклы!")
 end)
-
-]]--
