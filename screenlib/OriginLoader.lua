@@ -13,8 +13,8 @@
 ]]
 
 local SOURCES = {
-    ["origin lib"] = "https://raw.githubusercontent.com/OWNER/REPO/main/originlib.lua",
-    ["origin new"] = "https://raw.githubusercontent.com/OWNER/REPO/main/OriginNew.lua",
+    ["origin lib"] = "https://raw.githubusercontent.com/lexabrizhedstruykami/scripts/refs/heads/main/screenlib/OriginNew.lua",
+    ["origin new"] = "https://raw.githubusercontent.com/lexabrizhedstruykami/scripts/refs/heads/main/screenlib/originlib.lua",
 }
 
 local DEFAULT = "origin lib"
