@@ -4,7 +4,7 @@
   Замените URL ниже на raw-ссылку вашего OriginLoader.lua.
 ]]
 
-local lib = loadstring(game:HttpGet("URL_К_OriginLoader.lua"))()
+local lib = loadstring(game:HttpGet("https://raw.githubusercontent.com/lexabrizhedstruykami/scripts/refs/heads/main/screenlib/OriginLoader.lua"))()
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
