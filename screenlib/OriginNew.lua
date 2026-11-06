@@ -1,5 +1,5 @@
 --[[ ==========================================================================
-                                 originNEW v1.0
+                                 originNEW v1.1
               Новая UI-библиотека для Roblox с тем же API, что у originLIB
      ==========================================================================
 
@@ -9,15 +9,28 @@
       Section, Label, Divider, Notice, Notify, ShowIntro, OnUnload, Unload.
       Скрипт, написанный под originLIB, работает и тут без правок.
     * Стиль: анимированная градиентная обводка и свечение окна, плавное
-      появление/скрытие, боковая панель с аватаром, поиск по элементам
-      текущей вкладки, ripple-эффект на кнопках, переключатели с подсветкой,
-      слайдеры с всплывающим значением, HEX-ввод в ColorPicker,
-      уведомления с типами (info / success / warning / error).
-    * Настройки (вкладка "Settings"): клавиша меню, цвет акцента, масштаб,
-      прозрачность, ресайз, выбор UI lib, курсор, размытие экрана, Unload.
-    * Выбор библиотеки ("UI lib"): сохраняется в файл originLIB_uilib.txt
-      (или в getgenv, если файлы недоступны). Применяется после перезапуска
-      скрипта через OriginLoader.lua.
+      появление и скрытие, боковая панель с аватаром, ripple на кнопках,
+      слайдеры, которые скользят к значению, HEX-ввод в ColorPicker,
+      уведомления с типами (info, success, warning, error).
+    * Акцент по умолчанию Ember Night (#394F95). Буква логотипа, ручки
+      тогглов и слайдеров, текст на тёмном фоне подстраиваются под любой
+      акцент, в том числе белый.
+    * Поиск ищет по названию и по описанию, подсвечивает найденное.
+    * Описания функций на разных языках, показываются при наведении.
+    * Иконки: в заголовке, у вкладок, у элементов, у контактов и в меню more.
+      Принимаются ассет Roblox, ссылка (скачивается в OriginNew/icons) и
+      файл из папки workspace. Для ссылок и файлов нужен getcustomasset.
+    * Кнопки окна: крестик выгружает меню, минус сворачивает (остаются
+      название вкладки и игрок), глаз скрывает (откроется по бинду).
+    * Контакты над разделителем футера: contdsc, conttg, contcustom.
+    * Меню more (три точки справа от игрока): window:More(...).
+    * Стеклянный блюр (Enable Blur): парт-стекло и DepthOfField.
+    * Настройки сохраняются в OriginNewGuiSettings.cfg.
+    * Пресет автора скрипта (Window({ Preset = {...} })) и список конфигов в
+      настройках: "preset by script" и свои конфиги в OriginNew/configs.
+    * Выбор библиотеки ("UI lib"): строка lib в том же cfg. После смены
+      приходит сообщение о перезапуске, новая библиотека включится при
+      следующем запуске через OriginLoader.lua.
 
   БЫСТРЫЙ СТАРТ
     local originNew = loadstring(game:HttpGet("URL"))()
@@ -25,16 +38,30 @@
     local tab = window:Tab("Main")
     tab:Toggle("Auto Farm", false, function(state) print(state) end)
 
-  ОТЛИЧИЯ ОТ originLIB
-    * Нет стеклянного парта ("Enable Blur"/"Glass *"): методы
-      window:SetGlassEnabled / SetGlassDark / SetGlassOffsetY существуют,
-      но ничего не делают. Окно и так полупрозрачное и со свечением.
-      window:SetShadowEnabled(bool) включает/выключает свечение.
-    * Окно можно масштабировать (window:SetScale) и менять цвет акцента на
-      лету (window:SetAccent). Прозрачность: window:SetOpacity(0..1).
-    * Поддержка касаний (touch): перетаскивание и слайдеры.
+  ПАРАМЕТРЫ ОКНА
+    Title, Subtitle, Icon, HideIcon, DisableSettings, Preset,
+    contdsc, conttg, contcustom (ссылки), Contacts = { "contdsc:URL", ... }
+
+  ЭЛЕМЕНТ С ИКОНКОЙ И ОПИСАНИЕМ
+    tab:Button({ Text = "Fly", Icon = "https://...png",
+                 Desc = { en = "Lets you fly", ru = "Позволяет летать" } }, cb)
 
   ИСТОРИЯ ИЗМЕНЕНИЙ
+  v1.1
+    [FIX]     Вкладка настроек падала на кнопке Unload: поле tab.Button
+              перекрывало метод Tab:Button. Поле теперь tab.TabButton.
+    [FIX]     Тогглы настроек не выключаются при Unload и не затирают конфиг.
+    [FEATURE] Конфиг OriginNewGuiSettings.cfg (accent, ToggleKey, uiscale,
+              opacity, resize, glow, lib, unlockcur, fullscreenblur,
+              fullblurlevel, language, glass, glassdark, glassoffset,
+              autoloadme).
+    [FEATURE] Акцент по умолчанию #394F95 и подстройка цветов под акцент.
+    [FEATURE] Иконки, описания на нескольких языках, поиск по описанию.
+    [FEATURE] Контакты, меню more, кнопки "глаз", "минус", "крестик".
+    [FEATURE] Свёрнутый режим: только название вкладки и игрок.
+    [FEATURE] Стеклянный блюр, плавные слайдеры.
+    [FEATURE] Пресет автора скрипта и именованные конфиги в настройках.
+
   v1.0
     Первая версия.
 ============================================================================ ]]
@@ -54,7 +81,7 @@ local UI_LIB_FILE = "originLIB_uilib.txt"
 local RESTART_MESSAGE = "Restart the script to enable other ui lib"
 
 local originNew = {
-    Version = "1.0",
+    Version = "1.1",
     Name = LIB_NAME,
     Windows = {},
     GlobalUnloadTasks = {},
@@ -72,6 +99,15 @@ local originNew = {
     _blurEnabled = false,
     _blurSize = 12,
     BlurEffect = nil,
+    -- Стеклянный парт (общий DepthOfField на все окна с включённым стеклом)
+    _glassUsers = 0,
+    _glassDOF = nil,
+    -- Конфиг
+    _cfg = nil,
+    _preset = {},
+    _autoSave = true,
+    _saveToken = 0,
+    Languages = { "en", "ru", "uk", "es", "de", "fr", "pt", "tr", "pl" },
 }
 
 local Window = {}
@@ -99,9 +135,33 @@ local C = {
     Warning   = Color3.fromRGB(255, 190, 80),
     Error     = Color3.fromRGB(255, 96, 112),
 }
-local DEFAULT_ACCENT = Color3.fromRGB(128, 92, 255)
+
+-- Яркость цвета (0..1). Нужна, чтобы подбирать читаемые цвета под любой акцент.
+local function luminance(c)
+    return 0.2126 * c.R + 0.7152 * c.G + 0.0722 * c.B
+end
+
+-- Цвет элементов, которые лежат НА акценте (буква в логотипе, ручка тоггла).
+-- Светлый акцент получает тёмный элемент, тёмный акцент получает белый.
+local function contrastOn(c)
+    if luminance(c) > 0.6 then return Color3.fromRGB(16, 16, 22) end
+    return Color3.fromRGB(255, 255, 255)
+end
+
+-- Акцент для текста на тёмном фоне окна: тёмный акцент осветляется до читаемого.
+local function readableAccent(c)
+    local l = luminance(c)
+    local target = 0.42
+    if l >= target then return c end
+    local t = (target - l) / (1 - l)
+    return Color3.new(c.R + (1 - c.R) * t, c.G + (1 - c.G) * t, c.B + (1 - c.B) * t)
+end
+
+-- Ember Night, #394F95
+local DEFAULT_ACCENT = Color3.fromRGB(57, 79, 149)
 
 local NOTIF_COLORS = {
+    info = readableAccent(DEFAULT_ACCENT),
     success = C.Success,
     warning = C.Warning,
     error = C.Error,
@@ -193,9 +253,16 @@ local function isMove(input)
         or input.UserInputType == Enum.UserInputType.Touch
 end
 
+-- Вторая точка градиента. Для светлого акцента (например, белого) она темнее,
+-- для очень тёмного светлее, иначе градиент пропадал бы на фоне.
 local function accent2Of(c)
     local h, s, v = Color3.toHSV(c)
-    return Color3.fromHSV((h + 0.09) % 1, math.clamp(s * 0.85, 0, 1), math.clamp(v * 1.08 + 0.02, 0, 1))
+    if luminance(c) > 0.7 then
+        return Color3.fromHSV(h, s, math.clamp(v * 0.72, 0, 1))
+    elseif v < 0.3 then
+        return Color3.fromHSV((h + 0.04) % 1, math.clamp(s * 0.9, 0, 1), math.clamp(v + 0.18, 0, 1))
+    end
+    return Color3.fromHSV((h + 0.06) % 1, math.clamp(s * 0.9, 0, 1), math.clamp(v * 1.12 + 0.03, 0, 1))
 end
 
 local function accentSeq(c)
@@ -242,6 +309,440 @@ local function ripple(host, input)
 end
 
 -- ==========================================
+-- ТЕКСТ: регистр, подсветка, описания
+-- ==========================================
+
+-- string.lower не понимает кириллицу, поэтому переводим регистр сами.
+-- Длина в байтах не меняется, так что позиции совпадают с исходной строкой.
+local function lowerU(str)
+    str = tostring(str or "")
+    local ok, result = pcall(function()
+        local out = {}
+        for _, cp in utf8.codes(str) do
+            if cp >= 0x410 and cp <= 0x42F then
+                cp = cp + 32
+            elseif cp >= 0x400 and cp <= 0x40F then
+                cp = cp + 80
+            elseif cp >= 65 and cp <= 90 then
+                cp = cp + 32
+            elseif cp >= 0xC0 and cp <= 0xDE and cp ~= 0xD7 then
+                cp = cp + 32
+            end
+            out[#out + 1] = utf8.char(cp)
+        end
+        return table.concat(out)
+    end)
+    if ok then return result end
+    return string.lower(str)
+end
+
+local function escapeRich(str)
+    str = tostring(str or "")
+    str = str:gsub("&", "&amp;")
+    str = str:gsub("<", "&lt;")
+    str = str:gsub(">", "&gt;")
+    return str
+end
+
+-- Возвращает строку с RichText-подсветкой найденного фрагмента и флаг "нашли".
+local function highlight(plain, queryLower, hex)
+    plain = tostring(plain or "")
+    local a, b = lowerU(plain):find(queryLower, 1, true)
+    if not a then return escapeRich(plain), false end
+    return escapeRich(plain:sub(1, a - 1))
+        .. '<font color="' .. hex .. '"><b>' .. escapeRich(plain:sub(a, b)) .. "</b></font>"
+        .. escapeRich(plain:sub(b + 1)), true
+end
+
+-- Элемент можно описать строкой или таблицей:
+--   tab:Button({ Text = "Fly", Icon = "https://...", Desc = { en = "...", ru = "..." } }, cb)
+local function parseSpec(label)
+    if type(label) == "table" then
+        return {
+            text = tostring(label.Text or label.Name or label.Title or ""),
+            icon = label.Icon,
+            desc = label.Desc or label.Description,
+        }
+    end
+    return { text = tostring(label == nil and "" or label) }
+end
+
+local function descFor(desc, lang)
+    if type(desc) == "string" then return desc end
+    if type(desc) ~= "table" then return nil end
+    if desc[lang] then return desc[lang] end
+    if desc.en then return desc.en end
+    for _, value in pairs(desc) do
+        if type(value) == "string" then return value end
+    end
+    return nil
+end
+
+local function descList(desc)
+    local list = {}
+    if type(desc) == "string" then
+        list[1] = lowerU(desc)
+    elseif type(desc) == "table" then
+        for _, value in pairs(desc) do
+            if type(value) == "string" then list[#list + 1] = lowerU(value) end
+        end
+    end
+    return list
+end
+
+-- ==========================================
+-- ИКОНКИ
+-- Принимаются: число или "rbxassetid://..." (ассет Roblox), ссылка http(s)
+-- (скачивается один раз в OriginNew/icons) или путь к файлу в папке workspace
+-- executor-а. Для ссылок и файлов нужен getcustomasset. Форматы: png, jpg.
+-- ==========================================
+local ICON_DIR = "OriginNew/icons"
+local iconCache = {}
+
+local function hashStr(str)
+    local h = 5381
+    for i = 1, #str do
+        h = (h * 33 + str:byte(i)) % 4294967296
+    end
+    return string.format("%08x", h)
+end
+
+local function resolveIcon(spec, apply)
+    if spec == nil or spec == "" then return end
+    if type(spec) == "number" then
+        apply("rbxassetid://" .. tostring(spec))
+        return
+    end
+    if type(spec) ~= "string" then return end
+    if spec:match("^rbx%a*://") then
+        apply(spec)
+        return
+    end
+    if spec:match("^%d+$") then
+        apply("rbxassetid://" .. spec)
+        return
+    end
+    if iconCache[spec] then
+        apply(iconCache[spec])
+        return
+    end
+    task.spawn(function()
+        local asset
+        pcall(function()
+            if not getcustomasset then return end
+            local path = spec
+            if spec:match("^https?://") then
+                local clean = spec:gsub("[%?#].*$", "")
+                local ext = (clean:match("%.(%w+)$") or "png"):lower()
+                if ext ~= "png" and ext ~= "jpg" and ext ~= "jpeg" then ext = "png" end
+                path = ICON_DIR .. "/" .. hashStr(spec) .. "." .. ext
+                if not (isfile and isfile(path)) then
+                    local data
+                    local ok, res = pcall(function() return game:HttpGet(spec) end)
+                    if ok and type(res) == "string" and #res > 0 then
+                        data = res
+                    elseif request then
+                        local r = request({ Url = spec, Method = "GET" })
+                        data = r and r.Body
+                    end
+                    if not data or #data == 0 then return end
+                    if makefolder then
+                        pcall(makefolder, "OriginNew")
+                        pcall(makefolder, ICON_DIR)
+                    end
+                    writefile(path, data)
+                end
+            elseif not (isfile and isfile(spec)) then
+                return
+            end
+            asset = getcustomasset(path)
+        end)
+        if asset then
+            iconCache[spec] = asset
+            apply(asset)
+        end
+    end)
+end
+
+local function iconImage(parent, spec, size, color)
+    local img = create("ImageLabel", {
+        BackgroundTransparency = 1,
+        Size = UDim2.new(0, size, 0, size),
+        Image = "",
+        ImageColor3 = color or Color3.fromRGB(255, 255, 255),
+    }, parent)
+    resolveIcon(spec, function(asset)
+        if img.Parent then img.Image = asset end
+    end)
+    return img
+end
+
+-- ==========================================
+-- КОНФИГ (OriginNewGuiSettings.cfg)
+-- Строки вида "ключ:значение". Читается и пишется целиком, неизвестные ключи
+-- сохраняются. Ключ lib читает загрузчик, чтобы выбрать библиотеку.
+-- ==========================================
+local CFG_FILE = "OriginNewGuiSettings.cfg"
+local CFG_ORDER = {
+    "autoloadme", "accent", "ToggleKey", "uiscale", "opacity", "resize", "glow",
+    "lib", "unlockcur", "fullscreenblur", "fullblurlevel", "language",
+    "glass", "glassdark", "glassoffset", "config",
+}
+
+local function cfgRead(path)
+    path = path or CFG_FILE
+    local data = {}
+    local raw
+    pcall(function()
+        if readfile and isfile and isfile(path) then raw = readfile(path) end
+    end)
+    if type(raw) == "string" then
+        for line in (raw .. "\n"):gmatch("(.-)\r?\n") do
+            local key, value = line:match("^%s*([%w_]+)%s*:%s*(.-)%s*$")
+            if key then
+                -- "#23 (control)": комментарий в скобках отбрасываем
+                value = value:gsub("%s+%(.*%)%s*$", "")
+                data[key:lower()] = value
+            end
+        end
+    end
+    return data
+end
+
+local function cfgWrite(data, path)
+    path = path or CFG_FILE
+    local lines, seen = {}, {}
+    for _, key in ipairs(CFG_ORDER) do
+        local value = data[key:lower()]
+        if value ~= nil then
+            lines[#lines + 1] = key .. ":" .. tostring(value)
+            seen[key:lower()] = true
+        end
+    end
+    for key, value in pairs(data) do
+        if not seen[key] then lines[#lines + 1] = key .. ":" .. tostring(value) end
+    end
+    local ok = pcall(function() writefile(path, table.concat(lines, "\n") .. "\n") end)
+    return ok
+end
+
+local function toBool(raw, default)
+    if raw == nil then return default end
+    raw = tostring(raw):lower()
+    if raw == "true" or raw == "yes" or raw == "1" or raw == "on" then return true end
+    if raw == "false" or raw == "no" or raw == "0" or raw == "off" then return false end
+    return default
+end
+
+local function parseKey(raw)
+    if raw == nil then return nil end
+    raw = tostring(raw)
+    local name = raw:match("^%s*#?(%a%w*)")
+    if name then
+        local ok, item = pcall(function() return Enum.KeyCode[name] end)
+        if ok and item and typeof(item) == "EnumItem" then return item end
+    end
+    local num = tonumber(raw:match("#?(%d+)"))
+    if num then
+        local ok, found = pcall(function()
+            for _, item in ipairs(Enum.KeyCode:GetEnumItems()) do
+                if item.Value == num then return item end
+            end
+        end)
+        if ok then return found end
+    end
+    return nil
+end
+
+-- ==========================================
+-- ИМЕНОВАННЫЕ КОНФИГИ И ПРЕСЕТ СКРИПТА
+-- Конфиги лежат в OriginNew/configs/<имя>.cfg в том же формате "ключ:значение".
+-- Пресет задаёт автор скрипта (Window({ Preset = {...} }) или lib:SetPreset).
+-- Пресет не пишется на диск: он живёт в коде скрипта и выбирается в списке
+-- Config под именем "preset by script". Ключи lib, autoloadme и config в
+-- конфиги и пресеты не входят.
+-- ==========================================
+local CFG_DIR = "OriginNew/configs"
+local CFG_INDEX = CFG_DIR .. "/index.txt"
+local PRESET_NAME = "preset by script"
+local CFG_SKIP = { lib = true, autoloadme = true, config = true }
+
+local function cleanConfigName(name)
+    name = tostring(name or "")
+    name = name:gsub("[^%w _%-%.\128-\255]", "")
+    name = name:gsub("^%s+", "")
+    name = name:gsub("%s+$", "")
+    name = name:sub(1, 32)
+    local low = lowerU(name)
+    if name == "" or low == PRESET_NAME or low == "index" or low == "(none)" then return nil end
+    return name
+end
+
+local function configPath(name)
+    return CFG_DIR .. "/" .. name .. ".cfg"
+end
+
+local function ensureConfigDir()
+    if not makefolder then return end
+    pcall(makefolder, "OriginNew")
+    pcall(makefolder, CFG_DIR)
+end
+
+local function indexRead()
+    local names = {}
+    pcall(function()
+        if readfile and isfile and isfile(CFG_INDEX) then
+            for line in (readfile(CFG_INDEX) .. "\n"):gmatch("(.-)\r?\n") do
+                local n = cleanConfigName(line)
+                if n then names[#names + 1] = n end
+            end
+        end
+    end)
+    return names
+end
+
+local function indexWrite(names)
+    pcall(function()
+        ensureConfigDir()
+        writefile(CFG_INDEX, table.concat(names, "\n") .. "\n")
+    end)
+end
+
+local function presetValue(value)
+    if typeof(value) == "Color3" then return toHex(value) end
+    if typeof(value) == "EnumItem" then return value.Name end
+    return tostring(value)
+end
+
+-- Пресет автора скрипта. Значения: строки, числа, булевы, Color3, KeyCode.
+--   lib:SetPreset({ accent = Color3.fromRGB(255, 80, 80), uiscale = 95, language = "ru" })
+function originNew:SetPreset(preset)
+    self._preset = {}
+    if type(preset) ~= "table" then return end
+    for key, value in pairs(preset) do
+        local lk = tostring(key):lower()
+        if not CFG_SKIP[lk] then self._preset[lk] = presetValue(value) end
+    end
+end
+
+function originNew:GetPreset() return self._preset end
+function originNew:HasPreset() return next(self._preset) ~= nil end
+
+-- Имена сохранённых конфигов по алфавиту. Берутся из listfiles, а если его нет
+-- (или папка пуста), из файла index.txt. Остаются только существующие файлы.
+function originNew:ListConfigs()
+    local seen, names = {}, {}
+    local function add(name)
+        name = cleanConfigName(name)
+        if name and not seen[name] then
+            seen[name] = true
+            names[#names + 1] = name
+        end
+    end
+    pcall(function()
+        if listfiles and isfolder and isfolder(CFG_DIR) then
+            for _, path in ipairs(listfiles(CFG_DIR)) do
+                local n = tostring(path):match("([^/\\]+)%.cfg$")
+                if n then add(n) end
+            end
+        end
+    end)
+    for _, n in ipairs(indexRead()) do
+        local exists = false
+        pcall(function() exists = isfile and isfile(configPath(n)) end)
+        if exists then add(n) end
+    end
+    table.sort(names, function(a, b) return lowerU(a) < lowerU(b) end)
+    return names
+end
+
+-- Сохраняет значения (по умолчанию текущие настройки) под именем. Возвращает
+-- имя при успехе, либо false и причину.
+function originNew:SaveNamedConfig(name, data)
+    local clean = cleanConfigName(name)
+    if not clean then return false, "invalid name" end
+    if not writefile then return false, "no writefile" end
+    self:_initConfig()
+    local out = {}
+    for key, value in pairs(data or self._cfg) do
+        if not CFG_SKIP[key] then out[key] = value end
+    end
+    ensureConfigDir()
+    if not cfgWrite(out, configPath(clean)) then return false, "write failed" end
+    local names = indexRead()
+    local present = false
+    for _, n in ipairs(names) do
+        if n == clean then present = true end
+    end
+    if not present then
+        names[#names + 1] = clean
+        indexWrite(names)
+    end
+    return clean
+end
+
+-- Возвращает таблицу значений конфига или nil, если файла нет.
+function originNew:LoadNamedConfig(name)
+    local clean = cleanConfigName(name)
+    if not clean then return nil end
+    local exists = false
+    pcall(function() exists = isfile and isfile(configPath(clean)) end)
+    if not exists then return nil end
+    return cfgRead(configPath(clean))
+end
+
+function originNew:DeleteNamedConfig(name)
+    local clean = cleanConfigName(name)
+    if not clean then return false, "invalid name" end
+    if not delfile then return false, "no delfile" end
+    local ok = pcall(function() delfile(configPath(clean)) end)
+    if not ok then return false, "delete failed" end
+    local names, kept = indexRead(), {}
+    for _, n in ipairs(names) do
+        if n ~= clean then kept[#kept + 1] = n end
+    end
+    indexWrite(kept)
+    return true
+end
+
+function originNew:_initConfig()
+    if self._cfg then return end
+    self._cfg = cfgRead()
+    self._autoSave = toBool(self._cfg.autoloadme, true)
+end
+
+function originNew:LoadConfig()
+    self._cfg = cfgRead()
+    self._autoSave = toBool(self._cfg.autoloadme, true)
+    return self._cfg
+end
+
+-- Значение из конфига (ключ без учёта регистра) или nil.
+function originNew:GetConfig(key)
+    self:_initConfig()
+    return self._cfg[tostring(key):lower()]
+end
+
+-- Меняет значение в памяти. На диск пишет сразу, если включён автосейв
+-- (или force), с задержкой 0.6 с, чтобы перетаскивание слайдера не било по диску.
+function originNew:SetConfig(key, value, force)
+    self:_initConfig()
+    self._cfg[tostring(key):lower()] = tostring(value)
+    if not (self._autoSave or force) then return end
+    self._saveToken = self._saveToken + 1
+    local token = self._saveToken
+    task.delay(0.6, function()
+        if token == self._saveToken then cfgWrite(self._cfg) end
+    end)
+end
+
+function originNew:SaveConfig()
+    self:_initConfig()
+    self._saveToken = self._saveToken + 1
+    return cfgWrite(self._cfg)
+end
+
+-- ==========================================
 -- ВЫБОР UI LIB (общий формат с originLIB)
 -- ==========================================
 local function normalizeChoice(value)
@@ -255,12 +756,14 @@ end
 
 -- Возвращает сохранённый выбор ("origin lib" / "origin new") или nil.
 function originNew:GetUILib()
-    local choice
-    pcall(function()
-        if readfile and isfile and isfile(UI_LIB_FILE) then
-            choice = normalizeChoice(readfile(UI_LIB_FILE))
-        end
-    end)
+    local choice = normalizeChoice(cfgRead().lib)
+    if not choice then
+        pcall(function()
+            if readfile and isfile and isfile(UI_LIB_FILE) then
+                choice = normalizeChoice(readfile(UI_LIB_FILE))
+            end
+        end)
+    end
     if not choice then
         pcall(function() choice = normalizeChoice(getgenv().originLIB_UILib) end)
     end
@@ -272,11 +775,16 @@ function originNew:SetUILib(name)
     name = normalizeChoice(name)
     if not name then return false end
     local saved = false
+    -- Строка lib в конфиге (её читает загрузчик). Пишем сразу, без задержки,
+    -- и не трогаем остальные настройки на диске.
     pcall(function()
-        if writefile then
-            writefile(UI_LIB_FILE, name)
-            saved = true
-        end
+        local data = cfgRead()
+        data.lib = name
+        if writefile and cfgWrite(data) then saved = true end
+        if self._cfg then self._cfg.lib = name end
+    end)
+    pcall(function()
+        if writefile then writefile(UI_LIB_FILE, name) end
     end)
     pcall(function()
         getgenv().originLIB_UILib = name
@@ -377,7 +885,7 @@ function originNew:SetBlurEnabled(state)
 end
 
 function originNew:SetBlurSize(size)
-    self._blurSize = math.clamp(size, 0, 24)
+    self._blurSize = math.clamp(size, 0, 56)
     if self._blurEnabled and self.BlurEffect then
         tween(self.BlurEffect, { Size = self._blurSize }, 0.15)
     end
@@ -590,6 +1098,12 @@ function originNew:Unload()
         self.BlurEffect = nil
     end
     self._blurEnabled = false
+
+    if self._glassDOF then
+        self._glassDOF:Destroy()
+        self._glassDOF = nil
+    end
+    self._glassUsers = 0
 end
 
 function originNew:UnloadAll()
@@ -621,7 +1135,19 @@ function originNew:Window(config)
     window._minimized = false
     window._animToken = 0
     window._unloaded = false
-    window.Theme = { Accent = DEFAULT_ACCENT, Accent2 = accent2Of(DEFAULT_ACCENT) }
+    window.Language = "en"
+    window.Contacts = {}
+    window.MoreItems = {}
+    window.GlassEnabled = false
+    window.GlassDark = true
+    window.GlassOffsetY = 0
+    window._glassActive = false
+    window._id = #originNew.Windows + 1
+    window.Theme = {
+        Accent = DEFAULT_ACCENT,
+        Accent2 = accent2Of(DEFAULT_ACCENT),
+        AccentText = readableAccent(DEFAULT_ACCENT),
+    }
 
     table.insert(originNew.Windows, window)
 
@@ -690,6 +1216,7 @@ function originNew:Window(config)
         Name = "Sidebar", Size = UDim2.new(0, 176, 1, 0),
         BackgroundColor3 = C.Panel, BorderSizePixel = 0,
     }, main)
+    window.Sidebar = sidebar
     create("Frame", {
         Size = UDim2.new(0, 1, 1, 0), Position = UDim2.new(1, -1, 0, 0),
         BackgroundColor3 = C.Stroke, BorderSizePixel = 0,
@@ -707,6 +1234,12 @@ function originNew:Window(config)
     local logoGradient = create("UIGradient", { Color = accentSeq(DEFAULT_ACCENT), Rotation = 45 }, logo)
     local logoText = text(logo, "O", 16, Color3.fromRGB(255, 255, 255), Enum.Font.GothamBlack, Enum.TextXAlignment.Center)
     logoText.Size = UDim2.new(1, 0, 1, 0)
+    local logoImage = create("ImageLabel", {
+        AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.new(0, 22, 0, 22), BackgroundTransparency = 1, Image = "", Visible = false,
+    }, logo)
+    window._logoText = logoText
+    window._logoImage = logoImage
 
     local titleLabel = text(brand, tostring(options.Title or "originNEW"), 14, C.Text, Enum.Font.GothamBold)
     titleLabel.Position = UDim2.new(0, 56, 0, 14)
@@ -729,7 +1262,13 @@ function originNew:Window(config)
     create("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }, tabList)
     padding(tabList, 10, 2, 10, 2)
 
-    -- Футер: аватар + имя
+    -- Контакты (над разделителем футера)
+    local contactsFrame = create("Frame", {
+        Name = "Contacts", BackgroundTransparency = 1, Visible = false,
+        Position = UDim2.new(0, 0, 1, -62), Size = UDim2.new(1, 0, 0, 0),
+    }, sidebar)
+
+    -- Футер: аватар + имя + кнопка more (три точки)
     local footer = create("Frame", {
         Size = UDim2.new(1, 0, 0, 62), Position = UDim2.new(0, 0, 1, -62), BackgroundTransparency = 1,
     }, sidebar)
@@ -746,11 +1285,11 @@ function originNew:Window(config)
     local lp = Players.LocalPlayer
     local nameLabel = text(footer, lp and lp.DisplayName or "player", 12, C.Text, Enum.Font.GothamBold)
     nameLabel.Position = UDim2.new(0, 60, 0, 16)
-    nameLabel.Size = UDim2.new(1, -68, 0, 16)
+    nameLabel.Size = UDim2.new(1, -96, 0, 16)
     nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
     local tagLabel = text(footer, lp and ("@" .. lp.Name) or "@player", 10, C.Dim, Enum.Font.Gotham)
     tagLabel.Position = UDim2.new(0, 60, 0, 32)
-    tagLabel.Size = UDim2.new(1, -68, 0, 14)
+    tagLabel.Size = UDim2.new(1, -96, 0, 14)
     tagLabel.TextTruncate = Enum.TextTruncate.AtEnd
     task.spawn(function()
         pcall(function()
@@ -760,6 +1299,22 @@ function originNew:Window(config)
             end
         end)
     end)
+
+    local moreBtn = create("TextButton", {
+        AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 1),
+        Size = UDim2.new(0, 26, 0, 30), BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+        BackgroundTransparency = 1, Text = "", AutoButtonColor = false, Visible = false,
+    }, footer)
+    corner(moreBtn, 8)
+    for i = 0, 2 do
+        local dot = create("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, (i - 1) * 6),
+            Size = UDim2.new(0, 3, 0, 3), BackgroundColor3 = C.SubText, BorderSizePixel = 0,
+        }, moreBtn)
+        corner(dot, 2)
+    end
+    moreBtn.MouseEnter:Connect(function() tween(moreBtn, { BackgroundTransparency = 0.9 }, 0.15) end)
+    moreBtn.MouseLeave:Connect(function() tween(moreBtn, { BackgroundTransparency = 1 }, 0.15) end)
 
     -- ===== Правая часть =====
     local content = create("Frame", {
@@ -791,6 +1346,7 @@ function originNew:Window(config)
         end)
         return btn
     end
+    -- Крестик выгружает меню, минус сворачивает, глаз скрывает (откроется по бинду).
     local closeBtn = controlButton(40, C.Error)
     for _, rot in ipairs({ 45, -45 }) do
         create("Frame", {
@@ -805,9 +1361,32 @@ function originNew:Window(config)
         Size = UDim2.new(0, 12, 0, 2), BackgroundColor3 = C.SubText, BorderSizePixel = 0,
     }, minBtn)
 
+    local eyeBtn = controlButton(108)
+    local eyeDraw = create("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1,
+    }, eyeBtn)
+    local eyeShape = create("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.new(0, 18, 0, 10), BackgroundTransparency = 1, BorderSizePixel = 0,
+    }, eyeDraw)
+    corner(eyeShape, 5)
+    stroke(eyeShape, C.SubText, 1.6, 0)
+    local eyePupil = create("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.new(0, 4, 0, 4), BackgroundColor3 = C.SubText, BorderSizePixel = 0,
+    }, eyeDraw)
+    corner(eyePupil, 2)
+    local eyeImage = create("ImageLabel", {
+        AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.new(0, 18, 0, 18), BackgroundTransparency = 1, Image = "", Visible = false,
+    }, eyeBtn)
+    window._eyeDraw = eyeDraw
+    window._eyeImage = eyeImage
+
     -- Поиск
     local searchBox = create("Frame", {
-        Size = UDim2.new(0, 160, 0, 30), Position = UDim2.new(1, -74 - 8 - 160 - 4, 0.5, -15),
+        Size = UDim2.new(0, 160, 0, 30), Position = UDim2.new(1, -108 - 8 - 160 - 4, 0.5, -15),
         BackgroundColor3 = C.Field, BorderSizePixel = 0,
     }, topbar)
     corner(searchBox, 10)
@@ -852,6 +1431,15 @@ function originNew:Window(config)
     window.SearchInput = searchInput
     window.TitleLabel = titleLabel
     window.Grip = grip
+    window.SearchBox = searchBox
+    window.Brand = brand
+    window.Footer = footer
+    window.ContactsFrame = contactsFrame
+    window.MoreButton = moreBtn
+    window.Topbar = topbar
+    window.CloseButton = closeBtn
+    window.MinButton = minBtn
+    window.EyeButton = eyeBtn
     window._borderGradient = borderGradient
     window._logoGradient = logoGradient
     window._shadowEnabled = true
@@ -861,6 +1449,7 @@ function originNew:Window(config)
         local seq = accentSeq(a)
         borderGradient.Color = seq
         logoGradient.Color = seq
+        logoText.TextColor3 = contrastOn(a)
         for _, g in ipairs(glows) do g.gradient.Color = seq end
     end)
 
@@ -871,6 +1460,10 @@ function originNew:Window(config)
     end
 
     track(UserInputService.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement then
+            window._lastMouse = input.Position
+            if window.Tip and window.Tip.Visible then window:_moveTip(input.Position) end
+        end
         if window.DragState and isMove(input) then
             window.DragState.Update(input)
         end
@@ -952,15 +1545,78 @@ function originNew:Window(config)
 
     -- Поиск
     searchInput:GetPropertyChangedSignal("Text"):Connect(function()
-        window.SearchQuery = string.lower(searchInput.Text or "")
+        window.SearchQuery = lowerU(searchInput.Text or "")
         for _, t in ipairs(window.Tabs) do
             t.Tab:_applySearch()
         end
     end)
 
     -- Кнопки
-    closeBtn.MouseButton1Click:Connect(function() window:SetOpen(false) end)
+    closeBtn.MouseButton1Click:Connect(function()
+        if #originNew.Windows <= 1 then
+            originNew:Unload()
+        else
+            window:Unload()
+        end
+    end)
     minBtn.MouseButton1Click:Connect(function() window:SetMinimized(not window._minimized) end)
+    eyeBtn.MouseButton1Click:Connect(function()
+        window:SetOpen(false)
+        local keyName = "RightControl"
+        pcall(function()
+            if window._menuKeybind then keyName = window._menuKeybind.GetKey().Name end
+        end)
+        originNew:Notify({
+            Title = "Menu hidden",
+            Content = "Press " .. keyName .. " to show it again.",
+            Type = "info",
+            Duration = 3,
+        })
+    end)
+
+    -- Подсказка с описанием функции (показывается при наведении)
+    local tip = create("Frame", {
+        Name = "Tip", Visible = false, ZIndex = 60,
+        Size = UDim2.new(0, 230, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundColor3 = C.Card, BorderSizePixel = 0,
+    }, holder)
+    corner(tip, 8)
+    stroke(tip, C.StrokeHi, 1, 0)
+    padding(tip, 10, 7, 10, 8)
+    local tipLabel = text(tip, "", 11, C.SubText, Enum.Font.Gotham)
+    tipLabel.ZIndex = 61
+    tipLabel.Size = UDim2.new(1, 0, 0, 0)
+    tipLabel.AutomaticSize = Enum.AutomaticSize.Y
+    tipLabel.TextWrapped = true
+    tipLabel.TextYAlignment = Enum.TextYAlignment.Top
+    window.Tip = tip
+    window.TipLabel = tipLabel
+
+    -- Меню more: блокер (клик мимо закрывает) + всплывающее окно с действиями
+    local blocker = create("TextButton", {
+        Name = "MoreBlocker", Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1,
+        Text = "", AutoButtonColor = false, Visible = false, ZIndex = 40,
+    }, holder)
+    local popup = create("CanvasGroup", {
+        Name = "MorePopup", AnchorPoint = Vector2.new(0, 1), Visible = false, ZIndex = 41,
+        Position = UDim2.new(0, 12, 1, -68), Size = UDim2.new(0, 164, 0, 40),
+        BackgroundColor3 = C.Card, BorderSizePixel = 0, GroupTransparency = 1,
+    }, holder)
+    corner(popup, 10)
+    stroke(popup, C.StrokeHi, 1, 0)
+    padding(popup, 6, 6, 6, 6)
+    create("UIListLayout", { Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder }, popup)
+    window.MoreBlocker = blocker
+    window.MorePopup = popup
+    window._moreOpen = false
+    blocker.MouseButton1Click:Connect(function() window:_setMoreOpen(false) end)
+    moreBtn.MouseButton1Click:Connect(function() window:_setMoreOpen(not window._moreOpen) end)
+
+    -- Иконки, контакты, настройки
+    if options.Preset ~= nil then originNew:SetPreset(options.Preset) end
+    if options.Icon then window:SetIcon(options.Icon) end
+    if options.HideIcon then window:SetHideIcon(options.HideIcon) end
+    window:_collectContacts(options)
 
     if not options.DisableSettings and not options.disablesettings then
         window:BuildSettingsTab()
@@ -975,14 +1631,18 @@ end
 -- ==========================================
 function Window:_themed(fn)
     table.insert(self._themeFns, fn)
-    fn(self.Theme.Accent, self.Theme.Accent2)
+    fn(self.Theme.Accent, self.Theme.Accent2, self.Theme.AccentText)
 end
 
 function Window:SetAccent(color)
     self.Theme.Accent = color
     self.Theme.Accent2 = accent2Of(color)
+    self.Theme.AccentText = readableAccent(color)
     for _, fn in ipairs(self._themeFns) do
-        safeCall(fn, self.Theme.Accent, self.Theme.Accent2)
+        safeCall(fn, self.Theme.Accent, self.Theme.Accent2, self.Theme.AccentText)
+    end
+    if (self.SearchQuery or "") ~= "" then
+        for _, t in ipairs(self.Tabs) do t.Tab:_applySearch() end
     end
 end
 
@@ -1009,7 +1669,19 @@ end
 -- Прозрачность фона окна: 0 (непрозрачное) .. 1.
 function Window:SetOpacity(transparency)
     self._opacity = math.clamp(transparency, 0, 0.9)
-    tween(self.MainFrame, { BackgroundTransparency = self._opacity }, 0.2)
+    self:_applyBackground()
+end
+
+-- Фон окна: при стекле он наполовину прозрачный, иначе берётся из слайдера.
+function Window:_applyBackground()
+    local main = self._opacity
+    local panel = 0
+    if self.GlassEnabled then
+        main = math.max(self._opacity, 0.5)
+        panel = 0.5
+    end
+    tween(self.MainFrame, { BackgroundTransparency = main }, 0.2)
+    tween(self.Sidebar, { BackgroundTransparency = panel }, 0.2)
 end
 
 function Window:SetAllowResize(state)
@@ -1017,13 +1689,390 @@ function Window:SetAllowResize(state)
     self.Grip.Visible = self._allowResize and not self._minimized
 end
 
+-- Свёрнутое окно показывает только название вкладки и игрока.
+-- Название хаба, список вкладок, контакты, поиск и страницы скрываются.
 function Window:SetMinimized(state)
     state = state and true or false
     if state == self._minimized then return end
     self._minimized = state
+    self:_hideTip()
+    self:_setMoreOpen(false)
     local h = state and 52 or self._size.Y
     tween(self.Holder, { Size = UDim2.new(0, self._size.X, 0, h) }, 0.3)
     self.Grip.Visible = self._allowResize and not state
+    self.Brand.Visible = not state
+    self.TabList.Visible = not state
+    self.SearchBox.Visible = not state
+    self.Pages.Visible = not state
+    self.Footer.Position = state and UDim2.new(0, 0, 0, -5) or UDim2.new(0, 0, 1, -62)
+    self:_layoutSidebar()
+    self:_rebuildMore()
+end
+
+-- Иконка в заголовке (вместо буквы O): ассет, ссылка или файл в workspace.
+function Window:SetIcon(spec)
+    resolveIcon(spec, function(asset)
+        if not self._logoImage or not self._logoImage.Parent then return end
+        self._logoImage.Image = asset
+        self._logoImage.Visible = true
+        self._logoText.Visible = false
+    end)
+end
+
+-- Своя иконка для кнопки "скрыть меню" (по умолчанию рисуется глаз).
+function Window:SetHideIcon(spec, tint)
+    resolveIcon(spec, function(asset)
+        if not self._eyeImage or not self._eyeImage.Parent then return end
+        self._eyeImage.Image = asset
+        self._eyeImage.ImageColor3 = tint or Color3.fromRGB(255, 255, 255)
+        self._eyeImage.Visible = true
+        self._eyeDraw.Visible = false
+    end)
+end
+
+function Window:SetLanguage(code)
+    self.Language = tostring(code or "en"):lower()
+    if self.Tip and self.Tip.Visible and self._tipDesc then
+        self.TipLabel.Text = descFor(self._tipDesc, self.Language) or ""
+    end
+end
+
+-- ===== Описания при наведении =====
+function Window:_showTip(owner, desc)
+    if self._minimized then return end
+    local str = descFor(desc, self.Language)
+    if not str or str == "" then return end
+    self._tipOwner = owner
+    self._tipDesc = desc
+    self.TipLabel.Text = str
+    self.Tip.Visible = true
+    self:_moveTip(self._lastMouse)
+end
+
+function Window:_hideTip(owner)
+    if owner ~= nil and self._tipOwner ~= owner then return end
+    self._tipOwner = nil
+    self._tipDesc = nil
+    if self.Tip then self.Tip.Visible = false end
+end
+
+function Window:_moveTip(pos)
+    if not pos or not self.Tip then return end
+    local hp = self.Holder.AbsolutePosition
+    local scale = math.max(self._scale, 0.1)
+    local x = (pos.X - hp.X) / scale + 16
+    local y = (pos.Y - hp.Y) / scale + 20
+    x = math.clamp(x, 8, math.max(8, self._size.X - 238))
+    y = math.clamp(y, 8, math.max(8, self._size.Y - 50))
+    self.Tip.Position = UDim2.new(0, x, 0, y)
+end
+
+-- ===== Контакты над разделителем футера =====
+local CONTACT_LABELS = { dsc = "Discord", discord = "Discord", tg = "Telegram", telegram = "Telegram", custom = "Link" }
+local CONTACT_ORDER = { dsc = 1, discord = 1, tg = 2, telegram = 2, custom = 3 }
+
+function Window:_layoutSidebar()
+    local n = #self.Contacts
+    local height = (n > 0) and 40 or 0
+    self.ContactsFrame.Visible = n > 0 and not self._minimized
+    self.ContactsFrame.Position = UDim2.new(0, 0, 1, -62 - height)
+    self.ContactsFrame.Size = UDim2.new(1, 0, 0, height)
+    self.TabList.Size = UDim2.new(1, 0, 1, -66 - 62 - height)
+    local gap = 6
+    local w = math.floor((176 - 24 - (n - 1) * gap) / math.max(n, 1))
+    for i, contact in ipairs(self.Contacts) do
+        contact.btn.Size = UDim2.new(0, w, 0, 28)
+        contact.btn.Position = UDim2.new(0, 12 + (i - 1) * (w + gap), 0, 6)
+    end
+end
+
+-- window:Contact("dsc" | "tg" | "custom" | любое имя, url, подпись, иконка)
+function Window:Contact(kind, url, label, icon)
+    if type(url) ~= "string" or url == "" then return end
+    kind = (tostring(kind or "custom"):lower():gsub("^cont", ""))
+    local host = url:match("^%a+://([^/]+)")
+    if host then host = host:gsub("^www%.", "") end
+    label = label or CONTACT_LABELS[kind] or host or kind
+
+    local btn = create("TextButton", {
+        BackgroundColor3 = C.Field, BorderSizePixel = 0, Text = "", AutoButtonColor = false,
+        Size = UDim2.new(0, 60, 0, 28),
+    }, self.ContactsFrame)
+    corner(btn, 8)
+    local st = stroke(btn, C.Stroke, 1, 0)
+    local caption = text(btn, tostring(label), 11, C.SubText, Enum.Font.GothamBold, Enum.TextXAlignment.Center)
+    caption.Size = UDim2.new(1, 0, 1, 0)
+    caption.TextTruncate = Enum.TextTruncate.AtEnd
+    if icon then
+        local img = iconImage(btn, icon, 14, C.SubText)
+        img.AnchorPoint = Vector2.new(0, 0.5)
+        img.Position = UDim2.new(0, 8, 0.5, 0)
+        caption.Position = UDim2.new(0, 14, 0, 0)
+        caption.Size = UDim2.new(1, -14, 1, 0)
+    end
+    btn.MouseEnter:Connect(function()
+        tween(st, { Color = self.Theme.Accent }, 0.15)
+        tween(caption, { TextColor3 = C.Text }, 0.15)
+    end)
+    btn.MouseLeave:Connect(function()
+        tween(st, { Color = C.Stroke }, 0.15)
+        tween(caption, { TextColor3 = C.SubText }, 0.15)
+    end)
+    btn.MouseButton1Click:Connect(function()
+        local copied = false
+        pcall(function()
+            if setclipboard then
+                setclipboard(url)
+                copied = true
+            end
+        end)
+        originNew:Notify({
+            Title = tostring(label),
+            Content = copied and ("Link copied: " .. url) or url,
+            Type = "info",
+            Duration = 4,
+        })
+    end)
+
+    table.insert(self.Contacts, { kind = kind, url = url, btn = btn, order = CONTACT_ORDER[kind] or 4 })
+    table.sort(self.Contacts, function(a, b)
+        if a.order ~= b.order then return a.order < b.order end
+        return false
+    end)
+    self:_layoutSidebar()
+end
+
+-- Читает contdsc / conttg / contcustom и список Contacts из параметров окна.
+function Window:_collectContacts(options)
+    local found = {}
+    for key, value in pairs(options) do
+        if type(key) == "string" and type(value) == "string" and key:lower():match("^cont%a+$") then
+            table.insert(found, { kind = key:lower(), url = value })
+        end
+    end
+    table.sort(found, function(a, b)
+        local oa, ob = CONTACT_ORDER[a.kind:gsub("^cont", "")] or 4, CONTACT_ORDER[b.kind:gsub("^cont", "")] or 4
+        if oa ~= ob then return oa < ob end
+        return a.kind < b.kind
+    end)
+    for _, c in ipairs(found) do self:Contact(c.kind, c.url) end
+
+    if type(options.Contacts) == "table" then
+        for _, c in ipairs(options.Contacts) do
+            if type(c) == "string" then
+                local kind, url = c:match("^(cont%a+):(.+)$")
+                if kind then self:Contact(kind, url) end
+            elseif type(c) == "table" then
+                self:Contact(c.Kind or c.kind, c.Url or c.url, c.Text or c.text, c.Icon or c.icon)
+            end
+        end
+    end
+end
+
+-- ===== More: контекстное меню справа от имени игрока =====
+-- window:More("Название", function() ... end, иконка)
+-- window:More({ { Name = "A", Callback = fn }, { Name = "B", Callback = fn2 } })
+function Window:More(first, callback, icon)
+    if type(first) == "table" then
+        for _, entry in ipairs(first) do
+            self:More(entry.Name or entry.Text or entry[1], entry.Callback or entry.Function or entry[2], entry.Icon)
+        end
+        return
+    end
+    if type(first) ~= "string" or type(callback) ~= "function" then return end
+    table.insert(self.MoreItems, { name = first, fn = callback, icon = icon })
+    self:_rebuildMore()
+end
+
+function Window:_rebuildMore()
+    local popup = self.MorePopup
+    for _, child in ipairs(popup:GetChildren()) do
+        if child:IsA("TextButton") then child:Destroy() end
+    end
+    for i, item in ipairs(self.MoreItems) do
+        local row = create("TextButton", {
+            Size = UDim2.new(1, 0, 0, 30), BackgroundColor3 = C.Field, BackgroundTransparency = 1,
+            BorderSizePixel = 0, Text = "", AutoButtonColor = false, LayoutOrder = i, ZIndex = 42,
+        }, popup)
+        corner(row, 7)
+        local label = text(row, item.name, 12, C.SubText, Enum.Font.GothamMedium)
+        label.ZIndex = 43
+        label.Position = UDim2.new(0, 10, 0, 0)
+        label.Size = UDim2.new(1, -16, 1, 0)
+        label.TextTruncate = Enum.TextTruncate.AtEnd
+        if item.icon then
+            local img = iconImage(row, item.icon, 14, C.SubText)
+            img.ZIndex = 43
+            img.AnchorPoint = Vector2.new(0, 0.5)
+            img.Position = UDim2.new(0, 8, 0.5, 0)
+            label.Position = UDim2.new(0, 28, 0, 0)
+            label.Size = UDim2.new(1, -34, 1, 0)
+        end
+        row.MouseEnter:Connect(function()
+            tween(row, { BackgroundTransparency = 0 }, 0.12)
+            tween(label, { TextColor3 = C.Text }, 0.12)
+        end)
+        row.MouseLeave:Connect(function()
+            tween(row, { BackgroundTransparency = 1 }, 0.12)
+            tween(label, { TextColor3 = C.SubText }, 0.12)
+        end)
+        row.MouseButton1Click:Connect(function()
+            self:_setMoreOpen(false)
+            safeCall(item.fn)
+        end)
+    end
+    local count = #self.MoreItems
+    popup.Size = UDim2.new(0, 164, 0, 12 + count * 30 + math.max(count - 1, 0) * 3)
+    self.MoreButton.Visible = count > 0 and not self._minimized
+end
+
+function Window:_setMoreOpen(open)
+    open = open and #self.MoreItems > 0 and not self._minimized
+    if open == self._moreOpen then return end
+    self._moreOpen = open and true or false
+    local popup = self.MorePopup
+    self._moreToken = (self._moreToken or 0) + 1
+    local token = self._moreToken
+    if open then
+        self.MoreBlocker.Visible = true
+        popup.Visible = true
+        popup.Position = UDim2.new(0, 12, 1, -60)
+        popup.GroupTransparency = 1
+        tween(popup, { GroupTransparency = 0, Position = UDim2.new(0, 12, 1, -68) }, 0.22, Enum.EasingStyle.Quint)
+    else
+        self.MoreBlocker.Visible = false
+        tween(popup, { GroupTransparency = 1 }, 0.15)
+        task.delay(0.17, function()
+            if self._moreToken == token and popup.Parent then popup.Visible = false end
+        end)
+    end
+end
+
+-- ===== Стеклянный блюр: парт-стекло под окном + DepthOfField =====
+function originNew:_acquireGlassDOF()
+    self._glassUsers = self._glassUsers + 1
+    if not self._glassDOF then
+        local dof = Instance.new("DepthOfFieldEffect")
+        dof.Name = "originNEW_GlassDOF"
+        dof.FarIntensity = 0
+        dof.FocusDistance = 0.05
+        dof.InFocusRadius = 0.1
+        dof.NearIntensity = 1
+        dof.Parent = Lighting
+        self._glassDOF = dof
+    end
+    self._glassDOF.Enabled = true
+end
+
+function originNew:_releaseGlassDOF()
+    self._glassUsers = math.max(0, self._glassUsers - 1)
+    if self._glassUsers == 0 and self._glassDOF then
+        self._glassDOF.Enabled = false
+    end
+end
+
+local GLASS_PART_TRANSPARENCY = 0.3
+local GLASS_CLEAR_TRANSPARENCY = 0.98
+local GLASS_DISTANCE = 0.001
+
+-- Положение парта считается из UDim2 Position/Size окна и области ScreenGui,
+-- а не из AbsolutePosition (он бывает сдвинут на размер верхней панели).
+function Window:_updateGlass()
+    local part = self.GlassPart
+    local cam = Workspace.CurrentCamera
+    if not part or not cam or not self.Holder then return end
+    if part.Parent ~= cam then part.Parent = cam end
+
+    local guiPos = { X = 0, Y = 0 }
+    local guiSize = cam.ViewportSize
+    local gui = self.ScreenGui
+    if gui then
+        local gs, gp = gui.AbsoluteSize, gui.AbsolutePosition
+        if gs.X > 0 and gs.Y > 0 then guiSize, guiPos = gs, gp end
+    end
+
+    local p, s = self.Holder.Position, self.Holder.Size
+    local scale = self.Scale.Scale
+    local sizeX = (s.X.Scale * guiSize.X + s.X.Offset) * scale
+    local sizeY = (s.Y.Scale * guiSize.Y + s.Y.Offset) * scale
+    local centerX = guiPos.X + p.X.Scale * guiSize.X + p.X.Offset
+    local posX = centerX - sizeX / 2
+    local posY = guiPos.Y + p.Y.Scale * guiSize.Y + p.Y.Offset + self.GlassOffsetY
+
+    local function pointAt(x, y)
+        local ray = cam:ViewportPointToRay(x, y, 0)
+        return ray.Origin + ray.Direction * GLASS_DISTANCE
+    end
+    local topLeft = pointAt(posX, posY)
+    local topRight = pointAt(posX + sizeX, posY)
+    local bottomLeft = pointAt(posX, posY + sizeY)
+    local center = (topRight + bottomLeft) / 2
+    local width = math.max((topRight - topLeft).Magnitude, 0.001)
+    local height = math.max((bottomLeft - topLeft).Magnitude, 0.001)
+
+    part.Size = Vector3.new(width, height, 0.001)
+    part.CFrame = CFrame.lookAt(center, center + cam.CFrame.LookVector)
+end
+
+function Window:_setGlassActive(active)
+    active = active and true or false
+    if active == self._glassActive then return end
+    self._glassActive = active
+    local bindName = "originNEW_Glass_" .. tostring(self._id)
+
+    if active then
+        local part = Instance.new("Part")
+        part.Name = "originNEW_Glass"
+        part.Material = Enum.Material.Glass
+        part.Color = C.Bg
+        part.Transparency = self.GlassDark and GLASS_PART_TRANSPARENCY or GLASS_CLEAR_TRANSPARENCY
+        part.Anchored = true
+        part.CanCollide = false
+        part.CanTouch = false
+        part.CanQuery = false
+        part.CastShadow = false
+        part.Locked = true
+        part.Size = Vector3.new(1, 1, 0.001)
+        part.Parent = Workspace.CurrentCamera
+        self.GlassPart = part
+        originNew:_acquireGlassDOF()
+        RunService:BindToRenderStep(bindName, Enum.RenderPriority.Camera.Value + 1, function()
+            self:_updateGlass()
+        end)
+        self:_updateGlass()
+    else
+        RunService:UnbindFromRenderStep(bindName)
+        if self.GlassPart then
+            self.GlassPart:Destroy()
+            self.GlassPart = nil
+        end
+        originNew:_releaseGlassDOF()
+    end
+end
+
+-- Парт нужен, только пока включён режим И окно открыто.
+function Window:_refreshGlass()
+    self:_setGlassActive(self.GlassEnabled and self._open and not self._unloaded)
+end
+
+function Window:SetGlassEnabled(state)
+    self.GlassEnabled = state and true or false
+    self:_applyBackground()
+    self:_refreshGlass()
+end
+
+function Window:SetGlassDark(state)
+    self.GlassDark = state and true or false
+    if self.GlassPart then
+        tween(self.GlassPart, {
+            Transparency = self.GlassDark and GLASS_PART_TRANSPARENCY or GLASS_CLEAR_TRANSPARENCY,
+        }, 0.2)
+    end
+end
+
+-- Ручная подстройка по вертикали, если на вашем мониторе стекло сдвинуто.
+function Window:SetGlassOffsetY(px)
+    self.GlassOffsetY = tonumber(px) or 0
 end
 
 -- Свечение вокруг окна (замена "Window Shadow" из originLIB).
@@ -1034,11 +2083,6 @@ function Window:SetShadowEnabled(state)
         tween(g.frame, { BackgroundTransparency = target }, 0.25)
     end
 end
-
--- Заглушки совместимости со стеклянным парт-режимом originLIB.
-function Window:SetGlassEnabled() end
-function Window:SetGlassDark() end
-function Window:SetGlassOffsetY() end
 
 function Window:_startAnim()
     if self._animConn then return end
@@ -1093,6 +2137,11 @@ function Window:SetOpen(open)
     end
 
     originNew:_adjustMouseCapture(open and 1 or -1)
+    if not open then
+        self:_hideTip()
+        self:_setMoreOpen(false)
+    end
+    self:_refreshGlass()
 end
 
 function Window:Toggle()
@@ -1128,6 +2177,7 @@ function Window:Unload()
         originNew:_adjustMouseCapture(-1)
     end
     self._unloaded = true
+    self:_setGlassActive(false)
 
     if self.ScreenGui then self.ScreenGui:Destroy() end
 
@@ -1149,7 +2199,13 @@ end
 -- ==========================================
 -- ВКЛАДКИ
 -- ==========================================
-function Window:Tab(name, layoutOrder)
+-- window:Tab("Name", порядок, иконка) или window:Tab({ Name = "Name", Icon = "...", Order = 2 })
+function Window:Tab(name, layoutOrder, icon)
+    if type(name) == "table" then
+        layoutOrder = name.Order or name.LayoutOrder or layoutOrder
+        icon = name.Icon or icon
+        name = name.Name or name.Title
+    end
     local window = self
     local tab = setmetatable({}, Tab)
     tab.Window = self
@@ -1181,6 +2237,14 @@ function Window:Tab(name, layoutOrder)
     local label = text(btn, tab.Name, 13, C.SubText, Enum.Font.GothamMedium)
     label.Position = UDim2.new(0, 16, 0, 0)
     label.Size = UDim2.new(1, -24, 1, 0)
+    local tabIcon
+    if icon then
+        tabIcon = iconImage(btn, icon, 16, C.SubText)
+        tabIcon.AnchorPoint = Vector2.new(0, 0.5)
+        tabIcon.Position = UDim2.new(0, 16, 0.5, 0)
+        label.Position = UDim2.new(0, 40, 0, 0)
+        label.Size = UDim2.new(1, -48, 1, 0)
+    end
 
     self:_themed(function(a)
         local seq = accentSeq(a)
@@ -1200,17 +2264,19 @@ function Window:Tab(name, layoutOrder)
     self:_themed(function(a) page.ScrollBarImageColor3 = a end)
 
     tab.Page = page
-    tab.Button = btn
+    tab.TabButton = btn
 
     local function setActive(active)
         if active then
             tween(fill, { BackgroundTransparency = 0.82 }, 0.25)
             tween(marker, { Size = UDim2.new(0, 3, 0, 18) }, 0.35, Enum.EasingStyle.Back)
             tween(label, { TextColor3 = C.Text }, 0.2)
+            if tabIcon then tween(tabIcon, { ImageColor3 = C.Text }, 0.2) end
         else
             tween(fill, { BackgroundTransparency = 1 }, 0.2)
             tween(marker, { Size = UDim2.new(0, 3, 0, 0) }, 0.2)
             tween(label, { TextColor3 = C.SubText }, 0.2)
+            if tabIcon then tween(tabIcon, { ImageColor3 = C.SubText }, 0.2) end
         end
     end
 
@@ -1229,16 +2295,23 @@ function Window:Tab(name, layoutOrder)
         setActive(true)
         window.PageTitle.Text = tab.Name
         window:CloseOtherDropdowns(nil)
+        window:_hideTip()
         tab:_applySearch()
     end
     tab.Activate = activate
 
     btn.MouseButton1Click:Connect(activate)
     btn.MouseEnter:Connect(function()
-        if window.ActiveTab ~= tab then tween(label, { TextColor3 = C.Text }, 0.15) end
+        if window.ActiveTab ~= tab then
+            tween(label, { TextColor3 = C.Text }, 0.15)
+            if tabIcon then tween(tabIcon, { ImageColor3 = C.Text }, 0.15) end
+        end
     end)
     btn.MouseLeave:Connect(function()
-        if window.ActiveTab ~= tab then tween(label, { TextColor3 = C.SubText }, 0.15) end
+        if window.ActiveTab ~= tab then
+            tween(label, { TextColor3 = C.SubText }, 0.15)
+            if tabIcon then tween(tabIcon, { ImageColor3 = C.SubText }, 0.15) end
+        end
     end)
 
     table.insert(self.Tabs, { Tab = tab, setActive = setActive })
@@ -1251,22 +2324,94 @@ function Window:Tab(name, layoutOrder)
     return tab
 end
 
--- Фильтр по строке поиска: прячет элементы, не подходящие под запрос.
+-- Поиск идёт по названию и по описанию (на любом языке). Совпадение в названии
+-- подсвечивается, совпадение только в описании красит название акцентом.
 function Tab:_applySearch()
-    local q = self.Window.SearchQuery or ""
+    local window = self.Window
+    local q = window.SearchQuery or ""
+    local hex = toHex(window.Theme.AccentText)
     for _, item in ipairs(self._items) do
+        local label = item.title
+        if label and not item.marked then item.plain = label.Text end
+
         if q == "" then
             item.frame.Visible = true
+            if label and item.marked then
+                label.RichText = false
+                label.Text = item.plain
+                label.TextColor3 = item.baseColor
+                item.marked = false
+            end
         elseif item.kind == "section" or item.kind == "divider" then
             item.frame.Visible = false
         else
-            item.frame.Visible = item.name:find(q, 1, true) ~= nil
+            local inTitle = lowerU(item.plain or item.name):find(q, 1, true) ~= nil
+            local inDesc = false
+            for _, d in ipairs(item.descs) do
+                if d:find(q, 1, true) then inDesc = true break end
+            end
+            item.frame.Visible = inTitle or inDesc
+            if label and (inTitle or inDesc) then
+                if not item.marked then item.baseColor = label.TextColor3 end
+                item.marked = true
+                if inTitle then
+                    label.RichText = true
+                    label.Text = highlight(item.plain, q, hex)
+                    label.TextColor3 = item.baseColor
+                else
+                    label.RichText = false
+                    label.Text = item.plain
+                    label.TextColor3 = window.Theme.AccentText
+                end
+            elseif label and item.marked then
+                label.RichText = false
+                label.Text = item.plain
+                label.TextColor3 = item.baseColor
+                item.marked = false
+            end
         end
     end
 end
 
-function Tab:_register(frame, name, kind)
-    table.insert(self._items, { frame = frame, name = string.lower(tostring(name or "")), kind = kind or "element" })
+function Tab:_register(frame, name, kind, titleLabel, spec)
+    table.insert(self._items, {
+        frame = frame,
+        name = lowerU(name),
+        plain = tostring(name or ""),
+        kind = kind or "element",
+        title = titleLabel,
+        baseColor = titleLabel and titleLabel.TextColor3 or nil,
+        descs = descList(spec and spec.desc),
+        marked = false,
+    })
+end
+
+-- Иконка слева от названия и описание при наведении. `overlay` это невидимая
+-- кнопка поверх карточки: на неё тоже вешаем наведение.
+function Tab:_decorate(card, title, spec, overlay)
+    local window = self.Window
+    if spec.icon then
+        local shift = 26
+        local img = iconImage(card, spec.icon, 18, C.SubText)
+        img.AnchorPoint = Vector2.new(0, 0.5)
+        if title.Size.Y.Scale >= 1 then
+            img.Position = UDim2.new(0, 14, 0.5, 0)
+        else
+            img.Position = UDim2.new(0, 14, 0, title.Position.Y.Offset + title.Size.Y.Offset / 2)
+        end
+        title.Position = UDim2.new(title.Position.X.Scale, title.Position.X.Offset + shift, title.Position.Y.Scale, title.Position.Y.Offset)
+        title.Size = UDim2.new(title.Size.X.Scale, title.Size.X.Offset - shift, title.Size.Y.Scale, title.Size.Y.Offset)
+    end
+    if spec.desc then
+        local function enter() window:_showTip(card, spec.desc) end
+        local function leave() window:_hideTip(card) end
+        card.MouseEnter:Connect(enter)
+        card.MouseLeave:Connect(leave)
+        if overlay then
+            overlay.MouseEnter:Connect(enter)
+            overlay.MouseLeave:Connect(leave)
+        end
+    end
 end
 
 -- Карточка-контейнер элемента.
@@ -1297,6 +2442,8 @@ end
 -- Button(text, callback)
 function Tab:Button(label, callback)
     local window = self.Window
+    local spec = parseSpec(label)
+    label = spec.text
     local card = self:_card(42, true)
 
     local title = text(card, tostring(label), 13, C.Text, Enum.Font.GothamMedium)
@@ -1315,20 +2462,26 @@ function Tab:Button(label, callback)
         if isPress(input) then ripple(card, input) end
     end)
     click.MouseButton1Click:Connect(function()
-        tween(arrow, { TextColor3 = window.Theme.Accent }, 0.1)
+        tween(arrow, { TextColor3 = window.Theme.AccentText }, 0.1)
         task.delay(0.2, function()
             if arrow.Parent then tween(arrow, { TextColor3 = C.Dim }, 0.25) end
         end)
         safeCall(callback)
     end)
 
-    self:_register(card, label, "button")
-    return { SetText = function(value) title.Text = tostring(value) end }
+    self:_decorate(card, title, spec, click)
+    self:_register(card, label, "button", title, spec)
+    return {
+        SetText = function(value) title.Text = tostring(value) end,
+        Click = function() safeCall(callback) end,
+    }
 end
 
 -- Toggle(text, default, callback)
 function Tab:Toggle(label, default, callback)
     local window = self.Window
+    local spec = parseSpec(label)
+    label = spec.text
     local state = default and true or false
     local card = self:_card(42, true)
 
@@ -1357,6 +2510,14 @@ function Tab:Toggle(label, default, callback)
     }, track)
     corner(knob, 8)
 
+    -- Ручка на светлом акценте получает тёмный цвет, иначе она сливалась бы с заливкой.
+    local function knobColor(on)
+        if on then return contrastOn(window.Theme.Accent) end
+        return Color3.fromRGB(255, 255, 255)
+    end
+    knob.BackgroundColor3 = knobColor(state)
+    window:_themed(function() knob.BackgroundColor3 = knobColor(state) end)
+
     local click = create("TextButton", {
         Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "", AutoButtonColor = false, ZIndex = 3,
     }, card)
@@ -1365,23 +2526,31 @@ function Tab:Toggle(label, default, callback)
         state = newState and true or false
         tween(fill, { BackgroundTransparency = state and 0 or 1 }, 0.22)
         tween(knob, { Position = state and UDim2.new(1, -19, 0.5, 0) or UDim2.new(0, 3, 0.5, 0) }, 0.3, Enum.EasingStyle.Back)
+        tween(knob, { BackgroundColor3 = knobColor(state) }, 0.22)
         safeCall(callback, state)
     end
 
     click.MouseButton1Click:Connect(function() setState(not state) end)
 
-    table.insert(window.Toggles, {
-        IsOn = function() return state end,
-        SetState = setState,
-    })
+    -- Тогглы встроенной вкладки настроек не выключаются при Unload: иначе выгрузка
+    -- записала бы в конфиг "всё выключено".
+    if not self._internal then
+        table.insert(window.Toggles, {
+            IsOn = function() return state end,
+            SetState = setState,
+        })
+    end
 
-    self:_register(card, label, "toggle")
+    self:_decorate(card, title, spec, click)
+    self:_register(card, label, "toggle", title, spec)
     return { SetState = setState, IsOn = function() return state end }
 end
 
 -- Slider(text, min, max, default, callback)
 function Tab:Slider(label, min, max, default, callback)
     local window = self.Window
+    local spec = parseSpec(label)
+    label = spec.text
     min = min or 0
     max = max or 100
     if max == min then max = min + 1 end
@@ -1421,6 +2590,7 @@ function Tab:Slider(label, min, max, default, callback)
     window:_themed(function(a)
         fillGradient.Color = accentSeq(a)
         thumbStroke.Color = a
+        thumb.BackgroundColor3 = contrastOn(a)
     end)
 
     local function applyValue(v, fire)
@@ -1428,8 +2598,9 @@ function Tab:Slider(label, min, max, default, callback)
         local changed = v ~= value
         value = v
         local f = (v - min) / (max - min)
-        fill.Size = UDim2.new(f, 0, 1, 0)
-        thumb.Position = UDim2.new(f, 0, 0.5, 0)
+        -- Значения остаются целыми шагами, но полоска и ручка скользят к ним плавно.
+        tween(fill, { Size = UDim2.new(f, 0, 1, 0) }, 0.14)
+        tween(thumb, { Position = UDim2.new(f, 0, 0.5, 0) }, 0.14)
         valueLabel.Text = tostring(v)
         if fire and changed then safeCall(callback, v) end
     end
@@ -1443,7 +2614,7 @@ function Tab:Slider(label, min, max, default, callback)
         if not isPress(input) then return end
         update(input)
         tween(thumb, { Size = UDim2.new(0, 18, 0, 18) }, 0.15, Enum.EasingStyle.Back)
-        tween(valueLabel, { TextColor3 = window.Theme.Accent }, 0.15)
+        tween(valueLabel, { TextColor3 = window.Theme.AccentText }, 0.15)
         window.DragState = {
             Update = update,
             Release = function()
@@ -1455,7 +2626,8 @@ function Tab:Slider(label, min, max, default, callback)
     track.InputBegan:Connect(begin)
     thumb.InputBegan:Connect(begin)
 
-    self:_register(card, label, "slider")
+    self:_decorate(card, title, spec, nil)
+    self:_register(card, label, "slider", title, spec)
     return {
         GetValue = function() return value end,
         SetValue = function(v) applyValue(v, true) end,
@@ -1465,6 +2637,8 @@ end
 -- TextBox(text, placeholder, callback)
 function Tab:TextBox(label, placeholder, callback)
     local window = self.Window
+    local spec = parseSpec(label)
+    label = spec.text
     local card = self:_card(42, true)
 
     local title = text(card, tostring(label), 13, C.Text, Enum.Font.GothamMedium)
@@ -1491,7 +2665,8 @@ function Tab:TextBox(label, placeholder, callback)
         if enter then safeCall(callback, input.Text) end
     end)
 
-    self:_register(card, label, "textbox")
+    self:_decorate(card, title, spec, nil)
+    self:_register(card, label, "textbox", title, spec)
     return {
         Input = input,
         GetText = function() return input.Text end,
@@ -1514,8 +2689,10 @@ local FRIENDLY_KEYS = {
     [Enum.KeyCode.LeftAlt] = "Alt", [Enum.KeyCode.RightAlt] = "Alt",
 }
 
-function Tab:Keybind(label, defaultKey, callback)
+function Tab:Keybind(label, defaultKey, callback, onChange)
     local window = self.Window
+    local spec = parseSpec(label)
+    label = spec.text
     local currentKey = defaultKey or Enum.KeyCode.RightControl
     local card = self:_card(42, true)
 
@@ -1530,9 +2707,9 @@ function Tab:Keybind(label, defaultKey, callback)
     }, card)
     corner(pill, 8)
     local pillStroke = stroke(pill, C.Stroke, 1, 0)
-    local pillLabel = text(pill, "", 11, window.Theme.Accent, Enum.Font.GothamBold, Enum.TextXAlignment.Center)
+    local pillLabel = text(pill, "", 11, window.Theme.AccentText, Enum.Font.GothamBold, Enum.TextXAlignment.Center)
     pillLabel.Size = UDim2.new(1, 0, 1, 0)
-    window:_themed(function(a) pillLabel.TextColor3 = a end)
+    window:_themed(function(_, _, t) pillLabel.TextColor3 = t end)
 
     local function keyName(key) return FRIENDLY_KEYS[key] or key.Name end
     pillLabel.Text = keyName(currentKey)
@@ -1570,6 +2747,7 @@ function Tab:Keybind(label, defaultKey, callback)
         currentKey = newKey
         register(currentKey)
         pillLabel.Text = keyName(currentKey)
+        safeCall(onChange, currentKey)
     end
 
     pill.MouseButton1Click:Connect(function()
@@ -1588,7 +2766,8 @@ function Tab:Keybind(label, defaultKey, callback)
         }
     end)
 
-    self:_register(card, label, "keybind")
+    self:_decorate(card, title, spec, nil)
+    self:_register(card, label, "keybind", title, spec)
     return {
         GetKey = function() return currentKey end,
         SetKey = setKey,
@@ -1598,6 +2777,8 @@ end
 -- ColorPicker(text, defaultColor, callback)
 function Tab:ColorPicker(label, defaultColor, callback)
     local window = self.Window
+    local spec = parseSpec(label)
+    label = spec.text
     local currentColor = defaultColor or DEFAULT_ACCENT
     local h, s, v = Color3.toHSV(currentColor)
     local HEAD, OPEN_HEIGHT = 42, 236
@@ -1726,7 +2907,8 @@ function Tab:ColorPicker(label, defaultColor, callback)
         tween(card, { Size = UDim2.new(1, 0, 0, isOpen and OPEN_HEIGHT or HEAD) }, 0.35)
     end)
 
-    self:_register(card, label, "colorpicker")
+    self:_decorate(card, title, spec, header)
+    self:_register(card, label, "colorpicker", title, spec)
     return {
         GetColor = function() return currentColor end,
         SetColor = function(color)
@@ -1739,6 +2921,8 @@ end
 -- Общая сборка для Dropdown и MultiDropdown
 local function buildDropdown(tab, label, options, initial, callback, multi)
     local window = tab.Window
+    local spec = parseSpec(label)
+    label = spec.text
     options = options or {}
     local HEAD, ROW = 42, 30
 
@@ -1763,11 +2947,11 @@ local function buildDropdown(tab, label, options, initial, callback, multi)
     corner(pill, 8)
     stroke(pill, C.Stroke, 1, 0)
 
-    local pillLabel = text(pill, "", 11, window.Theme.Accent, Enum.Font.GothamBold)
+    local pillLabel = text(pill, "", 11, window.Theme.AccentText, Enum.Font.GothamBold)
     pillLabel.Position = UDim2.new(0, 10, 0, 0)
     pillLabel.Size = UDim2.new(1, -30, 1, 0)
     pillLabel.TextTruncate = Enum.TextTruncate.AtEnd
-    window:_themed(function(a) pillLabel.TextColor3 = a end)
+    window:_themed(function(_, _, t) pillLabel.TextColor3 = t end)
 
     local arrow = text(pill, "v", 11, C.SubText, Enum.Font.GothamBold, Enum.TextXAlignment.Center)
     arrow.Position = UDim2.new(1, -22, 0, 0)
@@ -1809,7 +2993,10 @@ local function buildDropdown(tab, label, options, initial, callback, multi)
         pillLabel.Text = summary()
     end
 
-    for index, option in ipairs(options) do
+    local function buildRows()
+      for _, old in ipairs(rows) do old.button:Destroy() end
+      rows = {}
+      for index, option in ipairs(options) do
         local row = create("TextButton", {
             Size = UDim2.new(1, -4, 0, ROW), BackgroundColor3 = C.Field, BorderSizePixel = 0,
             Text = "", AutoButtonColor = false, LayoutOrder = index,
@@ -1827,16 +3014,16 @@ local function buildDropdown(tab, label, options, initial, callback, multi)
         local boxStroke = stroke(box, C.StrokeHi, 1, 0)
         local mark = create("Frame", {
             AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0),
-            Size = UDim2.new(0, 6, 0, 6), BackgroundColor3 = window.Theme.Accent,
+            Size = UDim2.new(0, 6, 0, 6), BackgroundColor3 = window.Theme.AccentText,
             BackgroundTransparency = 1, BorderSizePixel = 0,
         }, box)
         corner(mark, multi and 2 or 3)
-        window:_themed(function(a) mark.BackgroundColor3 = a end)
+        window:_themed(function(_, _, t) mark.BackgroundColor3 = t end)
 
         row.MouseEnter:Connect(function() tween(row, { BackgroundColor3 = C.CardHover }, 0.12) end)
         row.MouseLeave:Connect(function() tween(row, { BackgroundColor3 = C.Field }, 0.12) end)
 
-        table.insert(rows, { option = option, mark = mark, label = rowLabel })
+        table.insert(rows, { option = option, mark = mark, label = rowLabel, button = row })
 
         row.MouseButton1Click:Connect(function()
             if multi then
@@ -1854,8 +3041,10 @@ local function buildDropdown(tab, label, options, initial, callback, multi)
                 tab.Window:CloseOtherDropdowns(nil)
             end
         end)
+      end
+      refreshRows()
     end
-    refreshRows()
+    buildRows()
 
     local isOpen = false
     local entry = {}
@@ -1873,10 +3062,33 @@ local function buildDropdown(tab, label, options, initial, callback, multi)
         setOpen(not isOpen)
     end)
 
-    tab:_register(card, label, multi and "multidropdown" or "dropdown")
+    tab:_decorate(card, title, spec, header)
+    tab:_register(card, label, multi and "multidropdown" or "dropdown", title, spec)
+
+    -- Меняет список вариантов на лету (нужно, например, для списка конфигов).
+    -- Выбранное значение сохраняется, если оно есть в новом списке.
+    local function setOptions(newOptions)
+        options = newOptions or {}
+        if multi then
+            local keep = {}
+            for _, o in ipairs(options) do
+                if set[o] then keep[o] = true end
+            end
+            set = keep
+        else
+            local found = false
+            for _, o in ipairs(options) do
+                if o == selected then found = true end
+            end
+            if not found then selected = options[1] end
+        end
+        buildRows()
+        if isOpen then setOpen(true) end
+    end
 
     if multi then
         return {
+            SetOptions = setOptions,
             GetValues = function()
                 local picked = {}
                 for _, o in ipairs(options) do
@@ -1887,6 +3099,7 @@ local function buildDropdown(tab, label, options, initial, callback, multi)
         }
     end
     return {
+        SetOptions = setOptions,
         GetValue = function() return selected end,
         SetValue = function(value)
             selected = value
@@ -1939,10 +3152,10 @@ function Tab:Section(label)
         Size = UDim2.new(1, 0, 0, 28), BackgroundTransparency = 1,
     }, self.Page)
 
-    local title = text(frame, string.upper(tostring(label or "SECTION")), 11, window.Theme.Accent, Enum.Font.GothamBold)
+    local title = text(frame, string.upper(tostring(label or "SECTION")), 11, window.Theme.AccentText, Enum.Font.GothamBold)
     title.Position = UDim2.new(0, 2, 0, 4)
     title.Size = UDim2.new(1, 0, 0, 16)
-    window:_themed(function(a) title.TextColor3 = a end)
+    window:_themed(function(_, _, t) title.TextColor3 = t end)
 
     create("Frame", {
         Position = UDim2.new(0, 0, 1, -4), Size = UDim2.new(1, 0, 0, 1),
@@ -2013,42 +3226,206 @@ end
 
 -- ==========================================
 -- ВСТРОЕННАЯ ВКЛАДКА SETTINGS
+-- Все значения хранятся в OriginNewGuiSettings.cfg. Если включено
+-- "Auto Load / Save Settings" (autoloadme:yes), сохранённые значения
+-- применяются при запуске и каждое изменение пишется в файл.
 -- ==========================================
 function Window:BuildSettingsTab()
     local window = self
+    originNew:_initConfig()
     local tab = window:Tab("Settings", 9999)
+    tab._internal = true
+    window.SettingsTab = tab
 
+    -- Начальное значение: сохранённое (если включена автозагрузка), затем
+    -- пресет автора скрипта, затем значение по умолчанию.
+    local function saved(key)
+        local k = key:lower()
+        if originNew._autoSave and originNew._cfg[k] ~= nil then return originNew._cfg[k] end
+        return originNew._preset[k]
+    end
+    local function remember(key, value)
+        originNew._cfg[key:lower()] = tostring(value)
+    end
+    local function persist(key, value)
+        originNew:SetConfig(key, value)
+    end
+
+    -- Начальные значения: из конфига или по умолчанию.
+    local accent = parseHex(saved("accent")) or DEFAULT_ACCENT
+    local uiscale = math.clamp(tonumber(saved("uiscale")) or 100, 70, 130)
+    local opacity = math.clamp(tonumber(saved("opacity")) or 94, 40, 100)
+    local resize = toBool(saved("resize"), true)
+    local glow = toBool(saved("glow"), true)
+    local language = saved("language") or "en"
+    local glass = toBool(saved("glass"), false)
+    local glassDark = toBool(saved("glassdark"), true)
+    local glassOffset = math.clamp(tonumber(saved("glassoffset")) or 0, -120, 120)
+    local unlock = toBool(saved("unlockcur"), true)
+    local fsBlur = toBool(saved("fullscreenblur"), false)
+    local fsLevel = math.clamp(tonumber(saved("fullblurlevel")) or 12, 2, 40)
+    local toggleKey = parseKey(saved("ToggleKey")) or Enum.KeyCode.RightControl
+
+    -- Применяем сразу, до создания элементов.
+    window:SetAccent(accent)
+    window:SetScale(uiscale / 100)
+    window:SetOpacity(1 - opacity / 100)
+    window:SetAllowResize(resize)
+    window:SetShadowEnabled(glow)
+    window:SetLanguage(language)
+    window:SetGlassDark(glassDark)
+    window:SetGlassOffsetY(glassOffset)
+    window:SetGlassEnabled(glass)
+    originNew:SetCursorUnlock(unlock)
+    originNew:SetBlurSize(fsLevel)
+    originNew:SetBlurEnabled(fsBlur)
+
+    remember("accent", toHex(accent))
+    remember("ToggleKey", toggleKey.Name)
+    remember("uiscale", uiscale)
+    remember("opacity", opacity)
+    remember("resize", tostring(resize))
+    remember("glow", tostring(glow))
+    remember("language", language)
+    remember("glass", tostring(glass))
+    remember("glassdark", tostring(glassDark))
+    remember("glassoffset", glassOffset)
+    remember("unlockcur", tostring(unlock))
+    remember("fullscreenblur", tostring(fsBlur))
+    remember("fullblurlevel", fsLevel)
+    remember("lib", originNew:GetUILib() or LIB_NAME)
+    remember("autoloadme", originNew._autoSave and "yes" or "no")
+
+    -- "Load Settings Now" проходит по этому списку и обновляет элементы.
+    local loaders = {}
+    local function loader(key, fn) table.insert(loaders, { key = key, fn = fn }) end
+
+    -- ===== Interface =====
     tab:Section("Interface")
 
-    tab:Keybind("Menu Toggle Key", Enum.KeyCode.RightControl, function()
-        window:Toggle()
+    local keyCtl = tab:Keybind(
+        { Text = "Menu Toggle Key", Desc = {
+            en = "Shows and hides the menu. The eye button hides it too.",
+            ru = "Показывает и скрывает меню. Кнопка с глазом тоже его скрывает.",
+        } },
+        toggleKey,
+        function() window:Toggle() end,
+        function(key) persist("ToggleKey", key.Name) end
+    )
+    window._menuKeybind = keyCtl
+    loader("ToggleKey", function(raw)
+        local key = parseKey(raw)
+        if key then keyCtl.SetKey(key) end
     end)
 
-    tab:ColorPicker("Accent Color", window.Theme.Accent, function(color)
-        window:SetAccent(color)
+    local accentCtl = tab:ColorPicker(
+        { Text = "Accent Color", Desc = {
+            en = "Main color of the border, glow, sliders and toggles. Elements on top of it adapt to light colors.",
+            ru = "Основной цвет обводки, свечения, ползунков и тогглов. Элементы поверх него подстраиваются под светлые цвета.",
+        } },
+        accent,
+        function(color)
+            window:SetAccent(color)
+            persist("accent", toHex(color))
+        end
+    )
+    loader("accent", function(raw)
+        local color = parseHex(raw)
+        if color then accentCtl.SetColor(color) end
     end)
 
-    tab:Slider("UI Scale (%)", 70, 130, 100, function(value)
+    local scaleCtl = tab:Slider("UI Scale (%)", 70, 130, uiscale, function(value)
         window:SetScale(value / 100)
+        persist("uiscale", value)
+    end)
+    loader("uiscale", function(raw)
+        local n = tonumber(raw)
+        if n then scaleCtl.SetValue(n) end
     end)
 
-    tab:Slider("Window Opacity (%)", 40, 100, 94, function(value)
+    local opacityCtl = tab:Slider("Window Opacity (%)", 40, 100, opacity, function(value)
         window:SetOpacity(1 - value / 100)
+        persist("opacity", value)
+    end)
+    loader("opacity", function(raw)
+        local n = tonumber(raw)
+        if n then opacityCtl.SetValue(n) end
     end)
 
-    tab:Toggle("Allow Window Resize", true, function(state)
+    local resizeCtl = tab:Toggle("Allow Window Resize", resize, function(state)
         window:SetAllowResize(state)
+        persist("resize", tostring(state))
     end)
+    loader("resize", function(raw) resizeCtl.SetState(toBool(raw, true)) end)
 
-    tab:Toggle("Window Glow", true, function(state)
+    local glowCtl = tab:Toggle("Window Glow", glow, function(state)
         window:SetShadowEnabled(state)
+        persist("glow", tostring(state))
+    end)
+    loader("glow", function(raw) glowCtl.SetState(toBool(raw, true)) end)
+
+    local languageCtl = tab:Dropdown(
+        { Text = "Language", Desc = {
+            en = "Language of the function descriptions shown on hover.",
+            ru = "Язык описаний функций, которые появляются при наведении.",
+        } },
+        originNew.Languages,
+        language,
+        function(code)
+            window:SetLanguage(code)
+            persist("language", code)
+        end
+    )
+    loader("language", function(raw)
+        if raw then languageCtl.SetValue(raw) end
     end)
 
+    -- ===== Glass =====
+    tab:Section("Glass")
+
+    local glassCtl = tab:Toggle(
+        { Text = "Enable Blur", Desc = {
+            en = "Glass mode: the window background turns half transparent and a glass part blurs the scene behind it.",
+            ru = "Стеклянный режим: фон окна становится наполовину прозрачным, а парт из стекла размывает сцену за ним.",
+        } },
+        glass,
+        function(state)
+            window:SetGlassEnabled(state)
+            persist("glass", tostring(state))
+        end
+    )
+    loader("glass", function(raw) glassCtl.SetState(toBool(raw, false)) end)
+
+    local darkCtl = tab:Toggle("Glass Darkness", glassDark, function(state)
+        window:SetGlassDark(state)
+        persist("glassdark", tostring(state))
+    end)
+    loader("glassdark", function(raw) darkCtl.SetState(toBool(raw, true)) end)
+
+    local offsetCtl = tab:Slider(
+        { Text = "Glass Y Offset", Desc = {
+            en = "If the glass sits too high or too low on your screen, move it with this slider.",
+            ru = "Если стекло на вашем экране выше или ниже окна, сдвиньте его этим ползунком.",
+        } },
+        -120, 120, glassOffset,
+        function(value)
+            window:SetGlassOffsetY(value)
+            persist("glassoffset", value)
+        end
+    )
+    loader("glassoffset", function(raw)
+        local n = tonumber(raw)
+        if n then offsetCtl.SetValue(n) end
+    end)
+
+    tab:Notice("Glass needs graphics quality 8 or higher. Below that the blur does not render, use Fullscreen Blur instead.", "warning")
+
+    -- ===== UI lib =====
     tab:Section("UI lib")
 
     tab:Dropdown("UI lib", UI_LIB_NAMES, originNew:GetUILib() or LIB_NAME, function(selected)
-        local saved = originNew:SetUILib(selected)
-        if not saved then
+        local ok = originNew:SetUILib(selected)
+        if not ok then
             originNew:Notify({
                 Title = "UI lib",
                 Content = "Could not save the choice. Your executor has no writefile.",
@@ -2065,21 +3442,194 @@ function Window:BuildSettingsTab()
         end
     end)
 
+    -- ===== Behavior =====
     tab:Section("Behavior")
 
-    tab:Toggle("Auto Unlock Cursor", originNew._cursorUnlockEnabled, function(state)
+    local unlockCtl = tab:Toggle("Auto Unlock Cursor", unlock, function(state)
         originNew:SetCursorUnlock(state)
+        persist("unlockcur", tostring(state))
     end)
+    loader("unlockcur", function(raw) unlockCtl.SetState(toBool(raw, true)) end)
 
-    tab:Toggle("Fullscreen Blur", originNew._blurEnabled, function(state)
+    local blurCtl = tab:Toggle("Fullscreen Blur", fsBlur, function(state)
         originNew:SetBlurEnabled(state)
+        persist("fullscreenblur", tostring(state))
     end)
+    loader("fullscreenblur", function(raw) blurCtl.SetState(toBool(raw, false)) end)
 
-    tab:Slider("Fullscreen Blur Intensity", 2, 40, originNew._blurSize, function(value)
+    local levelCtl = tab:Slider("Fullscreen Blur Intensity", 2, 40, fsLevel, function(value)
         originNew:SetBlurSize(value)
+        persist("fullblurlevel", value)
+    end)
+    loader("fullblurlevel", function(raw)
+        local n = tonumber(raw)
+        if n then levelCtl.SetValue(n) end
     end)
 
-    tab:Notice("The glass part is not available in origin new. Use Fullscreen Blur, or switch to origin lib for the glass effect.", "info")
+    -- ===== Config =====
+    tab:Section("Config")
+
+    local autoCtl = tab:Toggle(
+        { Text = "Auto Load / Save Settings", Desc = {
+            en = "On: saved settings load at start and every change is written to the file. Off: use the buttons below.",
+            ru = "Включено: сохранённые настройки загружаются при запуске, каждое изменение пишется в файл. Выключено: используйте кнопки ниже.",
+        } },
+        originNew._autoSave,
+        function(state)
+            originNew._autoSave = state
+            originNew:SetConfig("autoloadme", state and "yes" or "no", true)
+        end
+    )
+    loader("autoloadme", function(raw) autoCtl.SetState(toBool(raw, true)) end)
+
+    tab:Button("Save Settings Now", function()
+        if originNew:SaveConfig() then
+            originNew:Notify({ Title = "Config", Content = "Saved to " .. CFG_FILE, Type = "success", Duration = 3 })
+        else
+            originNew:Notify({ Title = "Config", Content = "Could not write the file. Your executor has no writefile.", Type = "error", Duration = 4 })
+        end
+    end)
+
+    tab:Button("Load Settings Now", function()
+        local file = cfgRead()
+        local count = 0
+        for _, entry in ipairs(loaders) do
+            local raw = file[entry.key:lower()]
+            if raw ~= nil then
+                entry.fn(raw)
+                count = count + 1
+            end
+        end
+        originNew:Notify({
+            Title = "Config",
+            Content = count > 0 and ("Loaded " .. count .. " settings.") or ("No saved settings in " .. CFG_FILE),
+            Type = count > 0 and "success" or "warning",
+            Duration = 3,
+        })
+    end)
+
+    tab:Notice("File: " .. CFG_FILE .. " in the executor workspace folder.", "info")
+
+    -- ===== Configs: пресет автора и свои конфиги =====
+    tab:Section("Configs")
+
+    local NONE = "(none)"
+    local function configOptions()
+        local list = {}
+        if originNew:HasPreset() then list[#list + 1] = PRESET_NAME end
+        for _, n in ipairs(originNew:ListConfigs()) do list[#list + 1] = n end
+        if #list == 0 then list[1] = NONE end
+        return list
+    end
+    local function has(list, value)
+        for _, v in ipairs(list) do
+            if v == value then return true end
+        end
+        return false
+    end
+
+    local options = configOptions()
+    local chosen = originNew._cfg.config
+    if not chosen or not has(options, chosen) then chosen = options[1] end
+    remember("config", chosen)
+
+    local configCtl
+    configCtl = tab:Dropdown(
+        { Text = "Config", Desc = {
+            en = "Pick a config. 'preset by script' holds the settings the script author chose, the others are your own saved configs.",
+            ru = "Выберите конфиг. 'preset by script' хранит настройки, которые выбрал автор скрипта, остальные это ваши сохранённые конфиги.",
+        } },
+        options,
+        chosen,
+        function(name)
+            chosen = name
+            persist("config", name)
+        end
+    )
+
+    local nameBox = tab:TextBox(
+        { Text = "Config name", Desc = {
+            en = "Name for Save Config. Leave empty to overwrite the selected config.",
+            ru = "Имя для Save Config. Оставьте пустым, чтобы перезаписать выбранный конфиг.",
+        } },
+        "my config",
+        function() end
+    )
+
+    local function refreshConfigs(select)
+        local list = configOptions()
+        configCtl.SetOptions(list)
+        chosen = has(list, select) and select or list[1]
+        configCtl.SetValue(chosen)
+    end
+
+    local function applyData(data)
+        local count = 0
+        for _, entry in ipairs(loaders) do
+            local k = entry.key:lower()
+            if not CFG_SKIP[k] and data[k] ~= nil then
+                entry.fn(data[k])
+                count = count + 1
+            end
+        end
+        return count
+    end
+
+    local function tell(title, content, kind)
+        originNew:Notify({ Title = title, Content = content, Type = kind or "info", Duration = 4 })
+    end
+
+    tab:Button("Load Config", function()
+        if chosen == NONE then
+            tell("Config", "No configs yet. Type a name and press Save Config.", "warning")
+        elseif chosen == PRESET_NAME then
+            tell("Config", "Preset by script applied (" .. applyData(originNew._preset) .. " settings).", "success")
+        else
+            local data = originNew:LoadNamedConfig(chosen)
+            if not data then
+                tell("Config", "Could not read '" .. chosen .. "'.", "error")
+            else
+                tell("Config", "Loaded '" .. chosen .. "' (" .. applyData(data) .. " settings).", "success")
+            end
+        end
+    end)
+
+    tab:Button("Save Config", function()
+        local typed = nameBox.GetText()
+        local target = (typed and typed:gsub("%s", "") ~= "") and typed or chosen
+        if target == PRESET_NAME or target == NONE then
+            tell("Config", "Type a name in Config name first. The preset can not be overwritten.", "warning")
+            return
+        end
+        local name, reason = originNew:SaveNamedConfig(target)
+        if name then
+            nameBox.SetText("")
+            refreshConfigs(name)
+            tell("Config", "Saved '" .. name .. "'.", "success")
+        else
+            tell("Config", "Could not save: " .. tostring(reason) .. ".", "error")
+        end
+    end)
+
+    tab:Button("Delete Config", function()
+        if chosen == PRESET_NAME or chosen == NONE then
+            tell("Config", "Select one of your own configs to delete.", "warning")
+            return
+        end
+        local ok, reason = originNew:DeleteNamedConfig(chosen)
+        if ok then
+            tell("Config", "Deleted '" .. chosen .. "'.", "success")
+            refreshConfigs(nil)
+        else
+            tell("Config", "Could not delete: " .. tostring(reason) .. ".", "error")
+        end
+    end)
+
+    tab:Button("Refresh Config List", function()
+        refreshConfigs(chosen)
+    end)
+
+    tab:Notice("Configs are saved in OriginNew/configs. The script author can ship a preset by script.", "info")
 
     tab:Button("Unload Script", function()
         originNew:Unload()

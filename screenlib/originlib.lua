@@ -108,6 +108,7 @@ local GLASS_DISTANCE = 0.001           -- отступ парта от плос�
 
 local originLIB = {
     Version = "5.6",
+    Name = "origin lib",
     Windows = {},            -- все живые окна (для UnloadAll / многооконности)
     GlobalUnloadTasks = {},  -- таски, зарегистрированные через originLIB:OnUnload
     NotificationHolder = nil,
@@ -134,6 +135,7 @@ originLIB.__index = originLIB
 local LIB_NAME = "origin lib"
 local UI_LIB_NAMES = { "origin lib", "origin new" }
 local UI_LIB_FILE = "originLIB_uilib.txt"
+local CFG_FILE = "OriginNewGuiSettings.cfg" -- общий конфиг с origin new, здесь трогаем только строку lib
 local RESTART_MESSAGE = "Restart the script to enable other ui lib"
 
 local function normalizeUILib(value)
@@ -145,14 +147,55 @@ local function normalizeUILib(value)
     return nil
 end
 
--- Возвращает сохранённый выбор ("origin lib" или "origin new"), либо nil.
-function originLIB:GetUILib()
+-- Строка lib из конфига (или nil).
+local function cfgGetLib()
     local choice
     pcall(function()
-        if readfile and isfile and isfile(UI_LIB_FILE) then
-            choice = normalizeUILib(readfile(UI_LIB_FILE))
+        if readfile and isfile and isfile(CFG_FILE) then
+            for line in (readfile(CFG_FILE) .. "\n"):gmatch("(.-)\r?\n") do
+                local key, value = line:match("^%s*([%w_]+)%s*:%s*(.-)%s*$")
+                if key and key:lower() == "lib" then choice = normalizeUILib(value) end
+            end
         end
     end)
+    return choice
+end
+
+-- Меняет только строку lib, остальные строки конфига остаются как были.
+local function cfgSetLib(name)
+    local ok = false
+    pcall(function()
+        if not writefile then return end
+        local lines, found = {}, false
+        if readfile and isfile and isfile(CFG_FILE) then
+            for line in (readfile(CFG_FILE) .. "\n"):gmatch("(.-)\r?\n") do
+                if line ~= "" then
+                    local key = line:match("^%s*([%w_]+)%s*:")
+                    if key and key:lower() == "lib" then
+                        line = "lib:" .. name
+                        found = true
+                    end
+                    lines[#lines + 1] = line
+                end
+            end
+        end
+        if not found then lines[#lines + 1] = "lib:" .. name end
+        writefile(CFG_FILE, table.concat(lines, "\n") .. "\n")
+        ok = true
+    end)
+    return ok
+end
+
+-- Возвращает сохранённый выбор ("origin lib" или "origin new"), либо nil.
+function originLIB:GetUILib()
+    local choice = cfgGetLib()
+    if not choice then
+        pcall(function()
+            if readfile and isfile and isfile(UI_LIB_FILE) then
+                choice = normalizeUILib(readfile(UI_LIB_FILE))
+            end
+        end)
+    end
     if not choice then
         pcall(function() choice = normalizeUILib(getgenv().originLIB_UILib) end)
     end
@@ -163,7 +206,7 @@ end
 function originLIB:SetUILib(name)
     name = normalizeUILib(name)
     if not name then return false end
-    local saved = false
+    local saved = cfgSetLib(name)
     pcall(function()
         if writefile then
             writefile(UI_LIB_FILE, name)
