@@ -39,7 +39,7 @@
     tab:Toggle("Auto Farm", false, function(state) print(state) end)
 
   ПАРАМЕТРЫ ОКНА
-    Title, Subtitle, Icon, HideIcon, DisableSettings, Preset,
+    Title, Subtitle, Icon, HideIcon, RecolorIcons, DisableSettings, Preset,
     contdsc, conttg, contcustom (ссылки), Contacts = { "contdsc:URL", ... }
 
   ЭЛЕМЕНТ С ИКОНКОЙ И ОПИСАНИЕМ
@@ -51,6 +51,9 @@
     [FEATURE] Крестик спрашивает подтверждение перед выгрузкой (Cancel / Unload).
     [FEATURE] Кнопка скрытия по умолчанию использует icons/view.png из репозитория,
               пока иконка качается или если не вышло, рисуется глаз.
+    [FEATURE] Тёмные png-значки с прозрачностью перекрашиваются в белый при
+              загрузке и дальше красятся цветами интерфейса. Отключается
+              параметром окна RecolorIcons = false. Результат кешируется.
   v1.1
     [FIX]     Вкладка настроек падала на кнопке Unload: поле tab.Button
               перекрывало метод Tab:Button. Поле теперь tab.TabButton.
@@ -418,7 +421,338 @@ local function hashStr(str)
     return string.format("%08x", h)
 end
 
-local function resolveIcon(spec, apply)
+-- ==========================================
+-- ПЕРЕКРАСКА ИКОНОК
+-- Чёрные и тёмные png с прозрачностью (обычные значки) перекрашиваются в
+-- белый, чтобы ImageColor3 мог красить их в цвета интерфейса. В Roblox цвет
+-- картинки только умножается, поэтому чёрный значок иначе не виден на тёмном
+-- фоне. Цветные значки не трогаются. Файл читается и пишется на Lua, без
+-- EditableImage, результат кешируется на диск.
+-- ==========================================
+local band, bor, bxor, rshift, lshift = bit32.band, bit32.bor, bit32.bxor, bit32.rshift, bit32.lshift
+
+local LBASE = { 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258 }
+local LEXT = { 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0 }
+local DBASE = { 1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577 }
+local DEXT = { 0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13 }
+local CLORDER = { 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 }
+
+local function buildHuffman(lengths, n)
+    local count = {}
+    for i = 0, 15 do count[i] = 0 end
+    for i = 0, n - 1 do count[lengths[i]] = count[lengths[i]] + 1 end
+    local offs = { [1] = 0 }
+    for i = 1, 14 do offs[i + 1] = offs[i] + count[i] end
+    local symbol = {}
+    for i = 0, n - 1 do
+        local l = lengths[i]
+        if l ~= 0 then
+            symbol[offs[l]] = i
+            offs[l] = offs[l] + 1
+        end
+    end
+    return { count = count, symbol = symbol }
+end
+
+local fixedLit, fixedDist
+local function fixedTables()
+    if fixedLit then return fixedLit, fixedDist end
+    local l = {}
+    for i = 0, 143 do l[i] = 8 end
+    for i = 144, 255 do l[i] = 9 end
+    for i = 256, 279 do l[i] = 7 end
+    for i = 280, 287 do l[i] = 8 end
+    fixedLit = buildHuffman(l, 288)
+    local d = {}
+    for i = 0, 29 do d[i] = 5 end
+    fixedDist = buildHuffman(d, 30)
+    return fixedLit, fixedDist
+end
+
+-- Возвращает таблицу байтов (1-based) или nil.
+local function inflate(data, startPos)
+    local pos = startPos
+    local bitbuf, bitcnt = 0, 0
+    local out, outn = {}, 0
+    local lastYield = 0
+
+    local function bits(need)
+        local val = bitbuf
+        while bitcnt < need do
+            local byte = string.byte(data, pos)
+            if not byte then error("eof") end
+            pos = pos + 1
+            val = bor(val, lshift(byte, bitcnt))
+            bitcnt = bitcnt + 8
+        end
+        bitbuf = rshift(val, need)
+        bitcnt = bitcnt - need
+        return band(val, lshift(1, need) - 1)
+    end
+
+    local function decode(h)
+        local code, first, index = 0, 0, 0
+        local count, symbol = h.count, h.symbol
+        for len = 1, 15 do
+            code = bor(code, bits(1))
+            local cnt = count[len]
+            if code - cnt < first then return symbol[index + (code - first)] end
+            index = index + cnt
+            first = (first + cnt) * 2
+            code = code * 2
+        end
+        error("bad code")
+    end
+
+    local function codes(lit, dist)
+        while true do
+            local sym = decode(lit)
+            if sym < 256 then
+                outn = outn + 1
+                out[outn] = sym
+            elseif sym == 256 then
+                return
+            else
+                sym = sym - 257
+                if sym >= 29 then error("bad length") end
+                local len = LBASE[sym + 1] + bits(LEXT[sym + 1])
+                local ds = decode(dist)
+                if ds >= 30 then error("bad dist") end
+                local d = DBASE[ds + 1] + bits(DEXT[ds + 1])
+                if d > outn then error("bad distance") end
+                for _ = 1, len do
+                    outn = outn + 1
+                    out[outn] = out[outn - d]
+                end
+            end
+            if outn - lastYield > 80000 then
+                lastYield = outn
+                task.wait()
+            end
+        end
+    end
+
+    repeat
+        local final = bits(1)
+        local kind = bits(2)
+        if kind == 0 then
+            bitbuf, bitcnt = 0, 0
+            local len = string.byte(data, pos) + string.byte(data, pos + 1) * 256
+            pos = pos + 4
+            for i = 0, len - 1 do
+                outn = outn + 1
+                out[outn] = string.byte(data, pos + i)
+            end
+            pos = pos + len
+        elseif kind == 1 then
+            local lit, dist = fixedTables()
+            codes(lit, dist)
+        elseif kind == 2 then
+            local nlen = bits(5) + 257
+            local ndist = bits(5) + 1
+            local ncode = bits(4) + 4
+            local lengths = {}
+            for i = 0, 18 do lengths[i] = 0 end
+            for i = 1, ncode do lengths[CLORDER[i]] = bits(3) end
+            local lencode = buildHuffman(lengths, 19)
+            local ll = {}
+            local idx = 0
+            while idx < nlen + ndist do
+                local sym = decode(lencode)
+                if sym < 16 then
+                    ll[idx] = sym
+                    idx = idx + 1
+                else
+                    local prev, rep = 0, 0
+                    if sym == 16 then
+                        prev = ll[idx - 1]
+                        rep = 3 + bits(2)
+                    elseif sym == 17 then
+                        rep = 3 + bits(3)
+                    else
+                        rep = 11 + bits(7)
+                    end
+                    for _ = 1, rep do
+                        ll[idx] = prev
+                        idx = idx + 1
+                    end
+                end
+            end
+            local litLengths, distLengths = {}, {}
+            for i = 0, nlen - 1 do litLengths[i] = ll[i] end
+            for i = 0, ndist - 1 do distLengths[i] = ll[nlen + i] end
+            codes(buildHuffman(litLengths, nlen), buildHuffman(distLengths, ndist))
+        else
+            error("bad block")
+        end
+    until final == 1
+    return out, outn
+end
+
+local crcTable
+local function crc32(str)
+    if not crcTable then
+        crcTable = {}
+        for i = 0, 255 do
+            local c = i
+            for _ = 1, 8 do
+                if band(c, 1) == 1 then c = bxor(0xEDB88320, rshift(c, 1)) else c = rshift(c, 1) end
+            end
+            crcTable[i] = c
+        end
+    end
+    local c = 0xFFFFFFFF
+    for i = 1, #str do
+        c = bxor(crcTable[band(bxor(c, string.byte(str, i)), 255)], rshift(c, 8))
+    end
+    return bxor(c, 0xFFFFFFFF)
+end
+
+local function be32(n)
+    return string.char(band(rshift(n, 24), 255), band(rshift(n, 16), 255), band(rshift(n, 8), 255), band(n, 255))
+end
+
+local function adler32(str)
+    local a, b = 1, 0
+    local len = #str
+    local i = 1
+    while i <= len do
+        local stop = math.min(i + 3999, len)
+        for j = i, stop do
+            a = a + string.byte(str, j)
+            b = b + a
+        end
+        a, b = a % 65521, b % 65521
+        i = stop + 1
+    end
+    return b * 65536 + a
+end
+
+local function chunk(kind, body)
+    return be32(#body) .. kind .. body .. be32(crc32(kind .. body))
+end
+
+local WHITE_PIXEL = {}
+for a = 0, 255 do WHITE_PIXEL[a] = "\255\255\255" .. string.char(a) end
+
+-- Принимает байты png. Возвращает байты нового png (белый значок с тем же
+-- альфа-каналом) или nil, если значок цветной, без прозрачности или формат
+-- не поддерживается.
+local function whitenPng(bytes)
+    local ok, result = pcall(function()
+        if bytes:sub(1, 8) ~= "\137PNG\r\n\26\n" then return nil end
+        local pos = 9
+        local w, h, depth, ctype, interlace
+        local palette, trns = nil, nil
+        local idat = {}
+        while pos <= #bytes - 7 do
+            local len = string.byte(bytes, pos) * 16777216 + string.byte(bytes, pos + 1) * 65536
+                + string.byte(bytes, pos + 2) * 256 + string.byte(bytes, pos + 3)
+            local kind = bytes:sub(pos + 4, pos + 7)
+            local body = bytes:sub(pos + 8, pos + 7 + len)
+            if kind == "IHDR" then
+                w = string.byte(body, 1) * 16777216 + string.byte(body, 2) * 65536 + string.byte(body, 3) * 256 + string.byte(body, 4)
+                h = string.byte(body, 5) * 16777216 + string.byte(body, 6) * 65536 + string.byte(body, 7) * 256 + string.byte(body, 8)
+                depth, ctype, interlace = string.byte(body, 9), string.byte(body, 10), string.byte(body, 13)
+            elseif kind == "PLTE" then
+                palette = body
+            elseif kind == "tRNS" then
+                trns = body
+            elseif kind == "IDAT" then
+                idat[#idat + 1] = body
+            elseif kind == "IEND" then
+                break
+            end
+            pos = pos + 12 + len
+        end
+        if not w or depth ~= 8 or interlace ~= 0 or w * h > 1100000 then return nil end
+        local channels = ({ [0] = 1, [2] = 3, [3] = 1, [4] = 2, [6] = 4 })[ctype]
+        if not channels then return nil end
+        if ctype == 0 or ctype == 2 then return nil end -- без альфа-канала
+        if ctype == 3 and (not palette or not trns) then return nil end
+
+        local data, n = inflate(table.concat(idat), 3)
+        local stride = w * channels
+        if n < (stride + 1) * h then return nil end
+
+        local alphas = {}
+        local lumSum, alphaSum, opaque = 0, 0, true
+        local prev, p = {}, 1
+        for y = 0, h - 1 do
+            local ft = data[p]
+            p = p + 1
+            local cur = {}
+            for x = 1, stride do
+                local v = data[p + x - 1]
+                local a = x > channels and cur[x - channels] or 0
+                local b = prev[x] or 0
+                if ft == 1 then
+                    v = v + a
+                elseif ft == 2 then
+                    v = v + b
+                elseif ft == 3 then
+                    v = v + math.floor((a + b) / 2)
+                elseif ft == 4 then
+                    local c = x > channels and (prev[x - channels] or 0) or 0
+                    local pa, pb, pc = math.abs(b - c), math.abs(a - c), math.abs(a + b - 2 * c)
+                    if pa <= pb and pa <= pc then v = v + a elseif pb <= pc then v = v + b else v = v + c end
+                end
+                cur[x] = v % 256
+            end
+            p = p + stride
+            local row = {}
+            for x = 0, w - 1 do
+                local alpha, lum
+                if ctype == 6 then
+                    local i = x * 4
+                    alpha = cur[i + 4]
+                    lum = 0.299 * cur[i + 1] + 0.587 * cur[i + 2] + 0.114 * cur[i + 3]
+                elseif ctype == 4 then
+                    alpha = cur[x * 2 + 2]
+                    lum = cur[x * 2 + 1]
+                else
+                    local index = cur[x + 1]
+                    alpha = string.byte(trns, index + 1) or 255
+                    lum = 0.299 * string.byte(palette, index * 3 + 1) + 0.587 * string.byte(palette, index * 3 + 2) + 0.114 * string.byte(palette, index * 3 + 3)
+                end
+                row[x + 1] = alpha
+                if alpha < 255 then opaque = false end
+                lumSum = lumSum + lum * alpha
+                alphaSum = alphaSum + alpha
+            end
+            alphas[y + 1] = row
+            prev = cur
+            if y % 32 == 31 then task.wait() end
+        end
+        if opaque or alphaSum == 0 then return nil end
+        if lumSum / alphaSum > 110 then return nil end -- значок уже светлый или цветной
+
+        local rows = {}
+        for y = 1, h do
+            local parts = { "\0" }
+            local row = alphas[y]
+            for x = 1, w do parts[x + 1] = WHITE_PIXEL[row[x]] end
+            rows[y] = table.concat(parts)
+        end
+        local raw = table.concat(rows)
+        local blocks = {}
+        local total = #raw
+        local i = 1
+        while i <= total do
+            local size = math.min(65535, total - i + 1)
+            local final = (i + size > total) and 1 or 0
+            blocks[#blocks + 1] = string.char(final, band(size, 255), rshift(size, 8), band(65535 - size, 255), rshift(65535 - size, 8)) .. raw:sub(i, i + size - 1)
+            i = i + size
+        end
+        local zlib = "\120\1" .. table.concat(blocks) .. be32(adler32(raw))
+        local ihdr = be32(w) .. be32(h) .. "\8\6\0\0\0"
+        return "\137PNG\r\n\26\n" .. chunk("IHDR", ihdr) .. chunk("IDAT", zlib) .. chunk("IEND", "")
+    end)
+    if ok then return result end
+    return nil
+end
+
+local function resolveIcon(spec, apply, whiten)
     if spec == nil or spec == "" then return end
     if type(spec) == "number" then
         apply("rbxassetid://" .. tostring(spec))
@@ -433,8 +767,10 @@ local function resolveIcon(spec, apply)
         apply("rbxassetid://" .. spec)
         return
     end
-    if iconCache[spec] then
-        apply(iconCache[spec])
+    whiten = whiten and originNew.RecolorIcons ~= false
+    local cacheKey = whiten and (spec .. "|w") or spec
+    if iconCache[cacheKey] then
+        apply(iconCache[cacheKey])
         return
     end
     task.spawn(function()
@@ -466,10 +802,30 @@ local function resolveIcon(spec, apply)
             elseif not (isfile and isfile(spec)) then
                 return
             end
+            -- Тёмный значок перекрашивается в белый, дальше его красит ImageColor3.
+            if whiten and readfile and writefile and path:lower():match("%.png$") then
+                local base = ICON_DIR .. "/" .. hashStr(spec)
+                local whitePath, keepPath = base .. "_w.png", base .. "_keep"
+                if isfile and isfile(whitePath) then
+                    path = whitePath
+                elseif not (isfile and isfile(keepPath)) then
+                    local converted = whitenPng(readfile(path))
+                    if makefolder then
+                        pcall(makefolder, "OriginNew")
+                        pcall(makefolder, ICON_DIR)
+                    end
+                    if converted then
+                        writefile(whitePath, converted)
+                        path = whitePath
+                    else
+                        pcall(writefile, keepPath, "1")
+                    end
+                end
+            end
             asset = getcustomasset(path)
         end)
         if asset then
-            iconCache[spec] = asset
+            iconCache[cacheKey] = asset
             apply(asset)
         end
     end)
@@ -484,7 +840,7 @@ local function iconImage(parent, spec, size, color)
     }, parent)
     resolveIcon(spec, function(asset)
         if img.Parent then img.Image = asset end
-    end)
+    end, true)
     return img
 end
 
@@ -1620,6 +1976,7 @@ function originNew:Window(config)
     moreBtn.MouseButton1Click:Connect(function() window:_setMoreOpen(not window._moreOpen) end)
 
     -- Иконки, контакты, настройки
+    if options.RecolorIcons ~= nil then originNew.RecolorIcons = options.RecolorIcons and true or false end
     if options.Preset ~= nil then originNew:SetPreset(options.Preset) end
     if options.Icon then window:SetIcon(options.Icon) end
     window:SetHideIcon(options.HideIcon or DEFAULT_HIDE_ICON)
@@ -1777,10 +2134,10 @@ function Window:SetHideIcon(spec, tint)
     resolveIcon(spec, function(asset)
         if not self._eyeImage or not self._eyeImage.Parent then return end
         self._eyeImage.Image = asset
-        self._eyeImage.ImageColor3 = tint or Color3.fromRGB(255, 255, 255)
+        self._eyeImage.ImageColor3 = tint or C.SubText
         self._eyeImage.Visible = true
         self._eyeDraw.Visible = false
-    end)
+    end, true)
 end
 
 function Window:SetLanguage(code)
