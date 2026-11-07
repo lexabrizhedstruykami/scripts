@@ -1,5 +1,5 @@
 --[[ ==========================================================================
-                                 originNEW v1.1
+                                 originNEW v1.2
               Новая UI-библиотека для Roblox с тем же API, что у originLIB
      ==========================================================================
 
@@ -47,6 +47,10 @@
                  Desc = { en = "Lets you fly", ru = "Позволяет летать" } }, cb)
 
   ИСТОРИЯ ИЗМЕНЕНИЙ
+  v1.2
+    [FEATURE] Крестик спрашивает подтверждение перед выгрузкой (Cancel / Unload).
+    [FEATURE] Кнопка скрытия по умолчанию использует icons/view.png из репозитория,
+              пока иконка качается или если не вышло, рисуется глаз.
   v1.1
     [FIX]     Вкладка настроек падала на кнопке Unload: поле tab.Button
               перекрывало метод Tab:Button. Поле теперь tab.TabButton.
@@ -81,7 +85,7 @@ local UI_LIB_FILE = "originLIB_uilib.txt"
 local RESTART_MESSAGE = "Restart the script to enable other ui lib"
 
 local originNew = {
-    Version = "1.1",
+    Version = "1.2",
     Name = LIB_NAME,
     Windows = {},
     GlobalUnloadTasks = {},
@@ -190,14 +194,20 @@ local function safeCall(fn, ...)
 end
 
 local function protectUI(gui)
-    if syn and syn.protect_gui then
-        syn.protect_gui(gui)
-        gui.Parent = CoreGui
-    elseif gethui then
-        gui.Parent = gethui()
-    else
-        gui.Parent = CoreGui
+    -- Порядок: gethui, затем CoreGui, затем PlayerGui. На слабых executor-ах
+    -- нет gethui или нет доступа к CoreGui, тогда интерфейс уходит в PlayerGui.
+    pcall(function()
+        if syn and syn.protect_gui then syn.protect_gui(gui) end
+    end)
+    local function try(getParent)
+        local ok, parent = pcall(getParent)
+        if not ok or typeof(parent) ~= "Instance" then return false end
+        local set = pcall(function() gui.Parent = parent end)
+        return set and gui.Parent == parent
     end
+    if gethui and try(gethui) then return end
+    if try(function() return CoreGui end) then return end
+    try(function() return game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui", 5) end)
 end
 
 -- Создаёт Instance, выставляет свойства и только потом родителя (быстрее).
@@ -397,6 +407,7 @@ end
 -- executor-а. Для ссылок и файлов нужен getcustomasset. Форматы: png, jpg.
 -- ==========================================
 local ICON_DIR = "OriginNew/icons"
+local DEFAULT_HIDE_ICON = "https://raw.githubusercontent.com/lexabrizhedstruykami/scripts/main/screenlib/icons/view.png"
 local iconCache = {}
 
 local function hashStr(str)
@@ -1553,11 +1564,7 @@ function originNew:Window(config)
 
     -- Кнопки
     closeBtn.MouseButton1Click:Connect(function()
-        if #originNew.Windows <= 1 then
-            originNew:Unload()
-        else
-            window:Unload()
-        end
+        window:_askUnload()
     end)
     minBtn.MouseButton1Click:Connect(function() window:SetMinimized(not window._minimized) end)
     eyeBtn.MouseButton1Click:Connect(function()
@@ -1615,7 +1622,7 @@ function originNew:Window(config)
     -- Иконки, контакты, настройки
     if options.Preset ~= nil then originNew:SetPreset(options.Preset) end
     if options.Icon then window:SetIcon(options.Icon) end
-    if options.HideIcon then window:SetHideIcon(options.HideIcon) end
+    window:SetHideIcon(options.HideIcon or DEFAULT_HIDE_ICON)
     window:_collectContacts(options)
 
     if not options.DisableSettings and not options.disablesettings then
@@ -1691,6 +1698,52 @@ end
 
 -- Свёрнутое окно показывает только название вкладки и игрока.
 -- Название хаба, список вкладок, контакты, поиск и страницы скрываются.
+-- ===== Подтверждение выгрузки (кнопка X) =====
+function Window:_askUnload()
+    if self._confirmGui and self._confirmGui.Parent then return end
+    local window = self
+    local last = #originNew.Windows <= 1
+    local overlay = create("TextButton", {
+        Name = "ConfirmUnload", Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+        BackgroundTransparency = 0.45, BorderSizePixel = 0, Text = "", AutoButtonColor = false, ZIndex = 80,
+    }, self.MainFrame)
+    local card = create("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.new(0, 320, 0, 150), BackgroundColor3 = C.Bg, BorderSizePixel = 0, ZIndex = 81,
+    }, overlay)
+    corner(card, 12)
+    stroke(card, C.Stroke, 1, 0)
+    local title = text(card, "Unload script?", 16, C.Text, Enum.Font.GothamBold)
+    title.Position = UDim2.new(0, 18, 0, 14); title.Size = UDim2.new(1, -36, 0, 22); title.ZIndex = 82
+    local body = text(card, last
+        and "The menu will be removed and all toggles will be turned off. To use it again you have to run the script again."
+        or "This window will be closed and its toggles turned off. Other windows stay open.",
+        12, C.SubText, Enum.Font.Gotham)
+    body.Position = UDim2.new(0, 18, 0, 42); body.Size = UDim2.new(1, -36, 0, 54)
+    body.TextWrapped = true; body.TextYAlignment = Enum.TextYAlignment.Top; body.ZIndex = 82
+
+    local function makeBtn(label, x, bg, fg)
+        local b = create("TextButton", {
+            Position = UDim2.new(x, x == 0 and 18 or -4, 1, -46), Size = UDim2.new(0.5, -14, 0, 32),
+            BackgroundColor3 = bg, BorderSizePixel = 0, Text = label, TextColor3 = fg,
+            Font = Enum.Font.GothamBold, TextSize = 13, AutoButtonColor = false, ZIndex = 82,
+        }, card)
+        corner(b, 8)
+        return b
+    end
+    local cancel = makeBtn("Cancel", 0, C.Field, C.Text)
+    local confirm = makeBtn("Unload", 0.5, C.Error, Color3.fromRGB(255, 255, 255))
+    self._confirmGui = overlay
+
+    local function close() if overlay.Parent then overlay:Destroy() end window._confirmGui = nil end
+    cancel.MouseButton1Click:Connect(close)
+    overlay.MouseButton1Click:Connect(close)
+    confirm.MouseButton1Click:Connect(function()
+        close()
+        if last then originNew:Unload() else window:Unload() end
+    end)
+end
+
 function Window:SetMinimized(state)
     state = state and true or false
     if state == self._minimized then return end
