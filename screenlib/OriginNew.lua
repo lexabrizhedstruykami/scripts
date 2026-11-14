@@ -1,5 +1,5 @@
 --[[ ==========================================================================
-                                 originNEW v1.2
+                                 originNEW v1.4
               Новая UI-библиотека для Roblox с тем же API, что у originLIB
      ==========================================================================
 
@@ -47,6 +47,16 @@
                  Desc = { en = "Lets you fly", ru = "Позволяет летать" } }, cb)
 
   ИСТОРИЯ ИЗМЕНЕНИЙ
+  v1.4
+    [FEATURE] Безопасная зона: окно возвращается внутрь зоны, если его
+              отпустили за краем. Зона двигается и меняет размер по сетке 5%,
+              настраивается во вкладке настроек (ключи keeponscreen, safezone).
+    [FEATURE] Режим стримера: скрывает ник, @username и аватарку. API:
+              originNew:SetStreamerMode, GetStreamerMode, OnStreamerMode, Mask
+              (ключи streamermode, streamername).
+  v1.3
+    [FEATURE] Общие функции из functions.lua (tab:BindButton и другие),
+              файл общий с origin lib. См. блок ОБЩИЕ ФУНКЦИИ внизу файла.
   v1.2
     [FEATURE] Крестик спрашивает подтверждение перед выгрузкой (Cancel / Unload).
     [FEATURE] Кнопка скрытия по умолчанию использует icons/view.png из репозитория,
@@ -88,7 +98,7 @@ local UI_LIB_FILE = "originLIB_uilib.txt"
 local RESTART_MESSAGE = "Restart the script to enable other ui lib"
 
 local originNew = {
-    Version = "1.2",
+    Version = "1.4",
     Name = LIB_NAME,
     Windows = {},
     GlobalUnloadTasks = {},
@@ -853,7 +863,8 @@ local CFG_FILE = "OriginNewGuiSettings.cfg"
 local CFG_ORDER = {
     "autoloadme", "accent", "ToggleKey", "uiscale", "opacity", "resize", "glow",
     "lib", "unlockcur", "fullscreenblur", "fullblurlevel", "language",
-    "glass", "glassdark", "glassoffset", "config",
+    "glass", "glassdark", "glassoffset", "keeponscreen", "safezone",
+    "streamermode", "streamername", "config",
 }
 
 local function cfgRead(path)
@@ -919,6 +930,14 @@ local function parseKey(raw)
         if ok then return found end
     end
     return nil
+end
+
+-- "x,y,w,h" из конфига (безопасная зона). Возвращает четыре числа или nil.
+local function parseZone(raw)
+    if type(raw) ~= "string" then return nil end
+    local a, b, c, d = raw:match("^%s*(-?%d+%.?%d*)%s*,%s*(-?%d+%.?%d*)%s*,%s*(-?%d+%.?%d*)%s*,%s*(-?%d+%.?%d*)%s*$")
+    if not a then return nil end
+    return tonumber(a), tonumber(b), tonumber(c), tonumber(d)
 end
 
 -- ==========================================
@@ -1658,14 +1677,21 @@ function originNew:Window(config)
     tagLabel.Position = UDim2.new(0, 60, 0, 32)
     tagLabel.Size = UDim2.new(1, -96, 0, 14)
     tagLabel.TextTruncate = Enum.TextTruncate.AtEnd
+    local avatarMask = text(avatar, "?", 16, C.Dim, Enum.Font.GothamBold)
+    avatarMask.Size = UDim2.new(1, 0, 1, 0)
+    avatarMask.TextXAlignment = Enum.TextXAlignment.Center
+    avatarMask.Visible = false
+    window._nameLabel, window._tagLabel, window._avatar, window._avatarMask = nameLabel, tagLabel, avatar, avatarMask
     task.spawn(function()
         pcall(function()
             if lp then
                 local img = Players:GetUserThumbnailAsync(lp.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size100x100)
-                if avatar and avatar.Parent then avatar.Image = img end
+                window._avatarImage = img
+                if avatar and avatar.Parent and not originNew._streamer then avatar.Image = img end
             end
         end)
     end)
+    window:_applyStreamer()
 
     local moreBtn = create("TextButton", {
         AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 1),
@@ -1789,6 +1815,9 @@ function originNew:Window(config)
     -- ===== Сохраняем ссылки =====
     window.ScreenGui = gui
     window.Holder = holder
+    gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+        window:KeepOnScreen(false)
+    end)
     window.MainFrame = main
     window.Scale = uiScale
     window.Glows = glows
@@ -1880,6 +1909,7 @@ function originNew:Window(config)
                     startPos.Y.Scale, startPos.Y.Offset + delta.Y
                 )
             end,
+            Release = function() window:KeepOnScreen(true) end,
         }
     end
     topbar.InputBegan:Connect(startDrag)
@@ -1906,6 +1936,7 @@ function originNew:Window(config)
                     startPos.Y.Scale, startPos.Y.Offset
                 )
             end,
+            Release = function() window:KeepOnScreen(true) end,
         }
     end)
     grip.Visible = window._allowResize
@@ -2028,6 +2059,7 @@ function Window:SetScale(scale)
     if self._open then
         tween(self.Scale, { Scale = self._scale }, 0.2)
     end
+    self:KeepOnScreen(true)
 end
 
 -- Прозрачность фона окна: 0 (непрозрачное) .. 1.
@@ -2117,6 +2149,7 @@ function Window:SetMinimized(state)
     self.Footer.Position = state and UDim2.new(0, 0, 0, -5) or UDim2.new(0, 0, 1, -62)
     self:_layoutSidebar()
     self:_rebuildMore()
+    self:KeepOnScreen(true)
 end
 
 -- Иконка в заголовке (вместо буквы O): ассет, ссылка или файл в workspace.
@@ -2522,6 +2555,7 @@ function Window:SetOpen(open)
     local token = self._animToken
 
     if open then
+        self:KeepOnScreen(false)
         self.Holder.Visible = true
         self.MainFrame.GroupTransparency = 1
         self.Scale.Scale = self._scale * 0.9
@@ -3097,6 +3131,7 @@ local FRIENDLY_KEYS = {
     [Enum.KeyCode.LeftControl] = "Control", [Enum.KeyCode.RightControl] = "Control",
     [Enum.KeyCode.LeftShift] = "Shift", [Enum.KeyCode.RightShift] = "Shift",
     [Enum.KeyCode.LeftAlt] = "Alt", [Enum.KeyCode.RightAlt] = "Alt",
+    [Enum.KeyCode.Unknown] = "None",
 }
 
 function Tab:Keybind(label, defaultKey, callback, onChange)
@@ -3675,6 +3710,11 @@ function Window:BuildSettingsTab()
     local fsBlur = toBool(saved("fullscreenblur"), false)
     local fsLevel = math.clamp(tonumber(saved("fullblurlevel")) or 12, 2, 40)
     local toggleKey = parseKey(saved("ToggleKey")) or Enum.KeyCode.RightControl
+    local keepOnScreen = toBool(saved("keeponscreen"), true)
+    local zoneX, zoneY, zoneW, zoneH = parseZone(saved("safezone"))
+    if not zoneX then zoneX, zoneY, zoneW, zoneH = 0, 0, 100, 100 end
+    local streamer = toBool(saved("streamermode"), false)
+    local streamerName = saved("streamername") or originNew._streamerName
 
     -- Применяем сразу, до создания элементов.
     window:SetAccent(accent)
@@ -3689,6 +3729,17 @@ function Window:BuildSettingsTab()
     originNew:SetCursorUnlock(unlock)
     originNew:SetBlurSize(fsLevel)
     originNew:SetBlurEnabled(fsBlur)
+    window:SetKeepOnScreen(keepOnScreen)
+    window:SetSafeZone(zoneX, zoneY, zoneW, zoneH, true)
+    -- Режим стримера общий для всех окон: значение из конфига берёт только
+    -- первое окно, следующие окна показывают то, что уже включено.
+    if not originNew._streamerInit then
+        originNew._streamerInit = true
+        originNew:SetStreamerName(streamerName)
+        originNew:SetStreamerMode(streamer)
+    end
+    streamer = originNew._streamer
+    streamerName = originNew._streamerName
 
     remember("accent", toHex(accent))
     remember("ToggleKey", toggleKey.Name)
@@ -3700,6 +3751,10 @@ function Window:BuildSettingsTab()
     remember("glass", tostring(glass))
     remember("glassdark", tostring(glassDark))
     remember("glassoffset", glassOffset)
+    remember("keeponscreen", tostring(keepOnScreen))
+    remember("safezone", table.concat({ window:GetSafeZone() }, ","))
+    remember("streamermode", tostring(originNew._streamer))
+    remember("streamername", originNew._streamerName)
     remember("unlockcur", tostring(unlock))
     remember("fullscreenblur", tostring(fsBlur))
     remember("fullblurlevel", fsLevel)
@@ -3829,6 +3884,95 @@ function Window:BuildSettingsTab()
     end)
 
     tab:Notice("Glass needs graphics quality 8 or higher. Below that the blur does not render, use Fullscreen Blur instead.", "warning")
+
+    -- ===== Window position =====
+    tab:Section("Window position")
+
+    local keepCtl = tab:Toggle(
+        { Text = "Keep Window On Screen", Desc = {
+            en = "If you drop the window past the edge of the safe zone, it slides back inside.",
+            ru = "Если отпустить окно за краем безопасной зоны, оно плавно вернётся внутрь.",
+        } },
+        keepOnScreen,
+        function(state)
+            window:SetKeepOnScreen(state)
+            persist("keeponscreen", tostring(state))
+        end
+    )
+    loader("keeponscreen", function(raw) keepCtl.SetState(toBool(raw, true)) end)
+
+    local zoneInfo = tab:Label("")
+    local function refreshZoneInfo()
+        local x, y, w, h = window:GetSafeZone()
+        zoneInfo.Text = string.format("Safe zone: left %d%%, top %d%%, size %d%% x %d%%", x, y, w, h)
+    end
+    refreshZoneInfo()
+    window._onZoneChanged = function(x, y, w, h)
+        refreshZoneInfo()
+        persist("safezone", table.concat({ x, y, w, h }, ","))
+    end
+    loader("safezone", function(raw)
+        local x, y, w, h = parseZone(raw)
+        if x then window:SetSafeZone(x, y, w, h) end
+    end)
+
+    tab:Toggle(
+        { Text = "Show Safe Zone Grid", Desc = {
+            en = "Draws a 5% grid on the screen. The bright frame is the safe zone, the dark area is outside it.",
+            ru = "Рисует на экране сетку с шагом 5%. Яркая рамка это безопасная зона, тёмное вокруг это вне зоны.",
+        } },
+        false,
+        function(state) window:ShowSafeZone(state) end
+    )
+
+    local function zoneButton(label, action)
+        tab:Button(label, function()
+            action()
+            window:FlashSafeZone(2.5)
+        end)
+    end
+    zoneButton("Move Zone Up", function() window:MoveSafeZone(0, -1) end)
+    zoneButton("Move Zone Down", function() window:MoveSafeZone(0, 1) end)
+    zoneButton("Move Zone Left", function() window:MoveSafeZone(-1, 0) end)
+    zoneButton("Move Zone Right", function() window:MoveSafeZone(1, 0) end)
+    zoneButton("Make Zone Bigger", function() window:ResizeSafeZone(1, 1) end)
+    zoneButton("Make Zone Smaller", function() window:ResizeSafeZone(-1, -1) end)
+    zoneButton("Reset Zone", function() window:ResetSafeZone() end)
+
+    -- ===== Streamer =====
+    tab:Section("Streamer")
+
+    local streamCtl = tab:Toggle(
+        { Text = "Streamer Mode", Desc = {
+            en = "Hides your nickname, @username and avatar in the menu.",
+            ru = "Скрывает ник, @username и аватарку в меню.",
+        } },
+        streamer,
+        function(state)
+            originNew:SetStreamerMode(state)
+            persist("streamermode", tostring(state))
+        end
+    )
+    loader("streamermode", function(raw) streamCtl.SetState(toBool(raw, false)) end)
+
+    local streamNameCtl = tab:TextBox(
+        { Text = "Hidden Name", Desc = {
+            en = "The name shown instead of your nickname while Streamer Mode is on.",
+            ru = "Имя, которое показывается вместо ника, пока включён режим стримера.",
+        } },
+        "Streamer",
+        function(name)
+            originNew:SetStreamerName(name)
+            persist("streamername", originNew:GetStreamerName())
+        end
+    )
+    streamNameCtl.SetText(streamerName)
+    loader("streamername", function(raw)
+        if raw then
+            originNew:SetStreamerName(raw)
+            streamNameCtl.SetText(originNew:GetStreamerName())
+        end
+    end)
 
     -- ===== UI lib =====
     tab:Section("UI lib")
@@ -4045,5 +4189,332 @@ function Window:BuildSettingsTab()
         originNew:Unload()
     end)
 end
+
+-- ==========================================
+-- БЕЗОПАСНАЯ ЗОНА ОКНА
+-- Если окно отпустили за краем зоны, оно плавно возвращается внутрь. Зона
+-- задаётся в процентах экрана с шагом 5 (по сетке): x, y слева сверху, w, h
+-- размер. По умолчанию это весь экран, значит окно не уходит за край.
+-- Через окно: window:SetKeepOnScreen(bool), window:SetSafeZone(x, y, w, h),
+-- window:MoveSafeZone(dx, dy), window:ResizeSafeZone(dw, dh) (в шагах сетки),
+-- window:ResetSafeZone(), window:ShowSafeZone(bool), window:KeepOnScreen().
+-- Отображение, размер окна и сдвиг зависят от библиотеки и лежат в
+-- _screenSize, _windowRect и _shiftWindow.
+-- ==========================================
+local ZONE_STEP, ZONE_MIN = 5, 30
+
+local function zoneSnap(value)
+    return math.floor(value / ZONE_STEP + 0.5) * ZONE_STEP
+end
+
+function Window:GetKeepOnScreen()
+    return self._keepOnScreen ~= false
+end
+
+function Window:GetSafeZone()
+    local zone = self._zone
+    if not zone then return 0, 0, 100, 100 end
+    return zone.x, zone.y, zone.w, zone.h
+end
+
+function Window:SetSafeZone(x, y, w, h, silent)
+    w = math.clamp(zoneSnap(tonumber(w) or 100), ZONE_MIN, 100)
+    h = math.clamp(zoneSnap(tonumber(h) or 100), ZONE_MIN, 100)
+    x = math.clamp(zoneSnap(tonumber(x) or 0), 0, 100 - w)
+    y = math.clamp(zoneSnap(tonumber(y) or 0), 0, 100 - h)
+    self._zone = { x = x, y = y, w = w, h = h }
+    self:_updateZoneOverlay()
+    self:KeepOnScreen(true)
+    if not silent and self._onZoneChanged then
+        self._onZoneChanged(x, y, w, h)
+    end
+end
+
+function Window:SetKeepOnScreen(state)
+    self._keepOnScreen = state ~= false
+    if self._keepOnScreen then self:KeepOnScreen(true) end
+end
+
+function Window:MoveSafeZone(dx, dy)
+    local x, y, w, h = self:GetSafeZone()
+    self:SetSafeZone(x + (dx or 0) * ZONE_STEP, y + (dy or 0) * ZONE_STEP, w, h)
+end
+
+-- Размер меняется от левого верхнего угла, зона не выходит за экран.
+function Window:ResizeSafeZone(dw, dh)
+    local x, y, w, h = self:GetSafeZone()
+    self:SetSafeZone(x, y, w + (dw or 0) * ZONE_STEP, h + (dh or 0) * ZONE_STEP)
+end
+
+function Window:ResetSafeZone()
+    self:SetSafeZone(0, 0, 100, 100)
+end
+
+-- Возвращает окно внутрь зоны. Окно больше зоны ставится по центру зоны.
+function Window:KeepOnScreen(animate)
+    if self._keepOnScreen == false then return end
+    local gw, gh = self:_screenSize()
+    if gw <= 0 or gh <= 0 then return end
+    local left, top, width, height = self:_windowRect()
+    local x, y, w, h = self:GetSafeZone()
+    local zoneLeft, zoneTop = x / 100 * gw, y / 100 * gh
+    local zoneW, zoneH = w / 100 * gw, h / 100 * gh
+
+    local function fit(pos, size, zonePos, zoneSize)
+        if size >= zoneSize then return zonePos + (zoneSize - size) / 2 end
+        return math.clamp(pos, zonePos, zonePos + zoneSize - size)
+    end
+
+    local dx = fit(left, width, zoneLeft, zoneW) - left
+    local dy = fit(top, height, zoneTop, zoneH) - top
+    if math.abs(dx) < 0.5 and math.abs(dy) < 0.5 then return end
+    self:_shiftWindow(dx, dy, animate)
+end
+
+-- Сетка и рамка зоны. Лежит позади окна, мышь не перехватывает.
+function Window:_buildZoneOverlay()
+    if self._zoneOverlay and self._zoneOverlay.root.Parent then return self._zoneOverlay end
+    local function frame(parent, props)
+        local f = Instance.new("Frame")
+        f.BorderSizePixel = 0
+        f.BackgroundTransparency = 1
+        f.ZIndex = 0
+        for key, value in pairs(props) do f[key] = value end
+        f.Parent = parent
+        return f
+    end
+    local root = frame(self.ScreenGui, {
+        Name = "SafeZoneOverlay", Size = UDim2.new(1, 0, 1, 0), Visible = false,
+    })
+    local overlay = { root = root }
+    for _, name in ipairs({ "top", "bottom", "left", "right" }) do
+        overlay[name] = frame(root, { BackgroundColor3 = Color3.fromRGB(0, 0, 0), BackgroundTransparency = 0.55 })
+    end
+    for i = 1, 19 do
+        local major = i % 2 == 0
+        local alpha = major and 0.8 or 0.92
+        frame(root, {
+            Position = UDim2.new(i / 20, 0, 0, 0), Size = UDim2.new(0, 1, 1, 0),
+            BackgroundColor3 = Color3.fromRGB(255, 255, 255), BackgroundTransparency = alpha,
+        })
+        frame(root, {
+            Position = UDim2.new(0, 0, i / 20, 0), Size = UDim2.new(1, 0, 0, 1),
+            BackgroundColor3 = Color3.fromRGB(255, 255, 255), BackgroundTransparency = alpha,
+        })
+    end
+    local border = frame(root, {})
+    local stroke = Instance.new("UIStroke")
+    stroke.Thickness = 2
+    stroke.Color = (self.Theme and self.Theme.Accent) or Color3.fromRGB(57, 79, 149)
+    stroke.Parent = border
+    overlay.border = border
+    overlay.stroke = stroke
+    self._zoneOverlay = overlay
+    return overlay
+end
+
+function Window:_updateZoneOverlay()
+    local wanted = self._zoneShow or self._zoneFlash
+    if not wanted then
+        if self._zoneOverlay and self._zoneOverlay.root.Parent then self._zoneOverlay.root.Visible = false end
+        return
+    end
+    local overlay = self:_buildZoneOverlay()
+    local x, y, w, h = self:GetSafeZone()
+    local fx, fy, fw, fh = x / 100, y / 100, w / 100, h / 100
+    overlay.top.Position = UDim2.new(0, 0, 0, 0)
+    overlay.top.Size = UDim2.new(1, 0, fy, 0)
+    overlay.bottom.Position = UDim2.new(0, 0, fy + fh, 0)
+    overlay.bottom.Size = UDim2.new(1, 0, 1 - fy - fh, 0)
+    overlay.left.Position = UDim2.new(0, 0, fy, 0)
+    overlay.left.Size = UDim2.new(fx, 0, fh, 0)
+    overlay.right.Position = UDim2.new(fx + fw, 0, fy, 0)
+    overlay.right.Size = UDim2.new(1 - fx - fw, 0, fh, 0)
+    overlay.border.Position = UDim2.new(fx, 0, fy, 0)
+    overlay.border.Size = UDim2.new(fw, 0, fh, 0)
+    if self.Theme and self.Theme.Accent then overlay.stroke.Color = self.Theme.Accent end
+    overlay.root.Visible = true
+end
+
+-- Постоянно показывает сетку (переключатель в настройках).
+function Window:ShowSafeZone(state)
+    self._zoneShow = state and true or false
+    self:_updateZoneOverlay()
+end
+
+-- Показывает сетку на пару секунд, чтобы увидеть, куда сдвинулась зона.
+function Window:FlashSafeZone(seconds)
+    self._zoneFlashToken = (self._zoneFlashToken or 0) + 1
+    local token = self._zoneFlashToken
+    self._zoneFlash = true
+    self:_updateZoneOverlay()
+    task.delay(seconds or 2.5, function()
+        if self._zoneFlashToken == token then
+            self._zoneFlash = false
+            self:_updateZoneOverlay()
+        end
+    end)
+end
+
+function Window:_screenSize()
+    local size = self.ScreenGui and self.ScreenGui.AbsoluteSize
+    if size and size.X > 0 and size.Y > 0 then return size.X, size.Y end
+    local cam = Workspace.CurrentCamera
+    if cam and cam.ViewportSize.X > 0 then return cam.ViewportSize.X, cam.ViewportSize.Y end
+    return 1280, 720
+end
+
+-- Holder привязан к верхнему центру и масштабируется UIScale вокруг него.
+function Window:_windowRect()
+    local gw, gh = self:_screenSize()
+    local p = self.Holder.Position
+    local width = self._size.X * self._scale
+    local height = (self._minimized and 52 or self._size.Y) * self._scale
+    local centerX = p.X.Scale * gw + p.X.Offset
+    local top = p.Y.Scale * gh + p.Y.Offset
+    return centerX - width / 2, top, width, height
+end
+
+function Window:_shiftWindow(dx, dy, animate)
+    local p = self.Holder.Position
+    local target = UDim2.new(p.X.Scale, p.X.Offset + dx, p.Y.Scale, p.Y.Offset + dy)
+    if animate then
+        tween(self.Holder, { Position = target }, 0.3, Enum.EasingStyle.Quint)
+    else
+        self.Holder.Position = target
+    end
+end
+
+-- ==========================================
+-- РЕЖИМ СТРИМЕРА
+-- Скрывает ник, @username и аватарку игрока в меню. Настройка общая для всех
+-- окон. Скриптам: originNew:GetStreamerMode(), originNew:OnStreamerMode(fn) и
+-- originNew:Mask(text), которая возвращает скрытое имя, пока режим включён.
+-- ==========================================
+originNew._streamer = false
+originNew._streamerName = "Streamer"
+originNew._streamerListeners = {}
+
+function originNew:GetStreamerMode()
+    return self._streamer == true
+end
+
+function originNew:GetStreamerName()
+    return self._streamerName
+end
+
+function originNew:SetStreamerName(name)
+    name = tostring(name or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if name == "" then name = "Streamer" end
+    self._streamerName = name
+    for _, window in ipairs(self.Windows) do window:_applyStreamer() end
+end
+
+function originNew:SetStreamerMode(state)
+    state = state and true or false
+    if state == self._streamer then return end
+    self._streamer = state
+    for _, window in ipairs(self.Windows) do window:_applyStreamer() end
+    for _, listener in ipairs({ table.unpack(self._streamerListeners) }) do
+        safeCall(listener, state)
+    end
+end
+
+-- Вызывает fn(state) при смене режима. Возвращает функцию отписки.
+function originNew:OnStreamerMode(fn)
+    table.insert(self._streamerListeners, fn)
+    return function()
+        for i, listener in ipairs(self._streamerListeners) do
+            if listener == fn then table.remove(self._streamerListeners, i) break end
+        end
+    end
+end
+
+-- Mask("Player123") возвращает скрытое имя в режиме стримера, иначе исходный текст.
+function originNew:Mask(text, replacement)
+    if self._streamer then return replacement or self._streamerName end
+    return text
+end
+
+function Window:_applyStreamer()
+    if not self._nameLabel or not self._nameLabel.Parent then return end
+    local lp = Players.LocalPlayer
+    if originNew._streamer then
+        self._nameLabel.Text = originNew._streamerName
+        self._tagLabel.Text = "@hidden"
+        self._avatar.Image = ""
+        self._avatarMask.Visible = true
+    else
+        self._nameLabel.Text = lp and lp.DisplayName or "player"
+        self._tagLabel.Text = lp and ("@" .. lp.Name) or "@player"
+        self._avatar.Image = self._avatarImage or ""
+        self._avatarMask.Visible = false
+    end
+end
+
+-- ==========================================
+-- ОБЩИЕ ФУНКЦИИ (functions.lua)
+-- Файл functions.lua общий для origin lib и origin new. При запуске библиотека
+-- скачивает его и добавляет его функции во вкладки (например tab:BindButton).
+-- Свои методы библиотеки не перезаписываются. Ссылку можно заменить через
+-- getgenv().originLIB_Functions (ссылка, таблица или функция Install).
+-- ==========================================
+local FUNCTIONS_URL = "https://raw.githubusercontent.com/lexabrizhedstruykami/scripts/main/screenlib/functions.lua"
+local FUNCTIONS_API_VERSION = 1
+
+function originNew:LoadFunctions(source)
+    local payload = source
+    if payload == nil then
+        local env = getgenv and getgenv() or {}
+        payload = env.originLIB_Functions or FUNCTIONS_URL
+    end
+    local module = payload
+    if type(payload) == "string" then
+        local body
+        local ok, res = pcall(function() return game:HttpGet(payload) end)
+        if ok and type(res) == "string" and #res > 0 then
+            body = res
+        else
+            local req = request or http_request or (syn and syn.request)
+            if req then
+                local okReq, r = pcall(req, { Url = payload, Method = "GET" })
+                if okReq and type(r) == "table" and type(r.Body) == "string" then body = r.Body end
+            end
+        end
+        if not body or body == "" then
+            warn("[" .. self.Name .. "] functions.lua was not downloaded, shared functions are unavailable.")
+            return false
+        end
+        local fn, compileError = (loadstring or load)(body)
+        if not fn then
+            warn("[" .. self.Name .. "] functions.lua does not compile: " .. tostring(compileError))
+            return false
+        end
+        local okRun, result = pcall(fn)
+        if not okRun then
+            warn("[" .. self.Name .. "] functions.lua failed: " .. tostring(result))
+            return false
+        end
+        module = result
+    end
+    if type(module) == "function" then module = { Install = module } end
+    if type(module) ~= "table" or type(module.Install) ~= "function" then
+        warn("[" .. self.Name .. "] functions.lua must return a table with Install(api).")
+        return false
+    end
+    local okInstall, defined = pcall(module.Install, {
+        lib = self, Name = self.Name, Version = FUNCTIONS_API_VERSION,
+        Tab = Tab, Window = Window, safeCall = safeCall,
+    })
+    if not okInstall then
+        warn("[" .. self.Name .. "] functions.lua Install failed: " .. tostring(defined))
+        return false
+    end
+    self.Functions = { Version = module.Version, Defined = defined or {} }
+    return true
+end
+
+originNew:LoadFunctions()
+
 
 return originNew
